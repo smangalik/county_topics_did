@@ -5,21 +5,34 @@ import sys
 from tqdm import tqdm
 from sklearn.neighbors import NearestNeighbors
 from scipy import stats
+import json
+import os.path
 
 # Ignore warnings
 warnings.catch_warnings()
 warnings.simplefilter("ignore")
 
 # How many of the top populous counties we want to keep
-top_county_count = 500
+top_county_count = 100
+
 # Number of topics studied
 num_topics = 2000
+
 # The county factors we want to cluster counties on
 county_stats = "num_users,num_tweets"
 county_factors_fields = "percent_male10, med_age10, log_med_house_income0509, high_school0509, bac0509"
 county_factors_fields += ",log_pop_density10, percent_black10,percent_white10, foreign_born0509, rep_pre_2012, married0509"
+
 # Number of nearest neighbors
-k_neighbors = 100
+k_neighbors = 30
+
+# Diff in Diff Windows
+event_timing_buffer = 4 # weeks before/after target event that are unaffected
+diff_radius = 2 # distance in weeks from the middle of target event
+diff_window_radius = 0 # how far to look around
+
+# TODO define events on a per county basis
+event_date_dict = {}
 
 
 print('Connecting to MySQL...')
@@ -37,7 +50,7 @@ def get_populous_counties(cursor, base_year):
     cnty, num_users = result
     cnty = str(cnty).zfill(5)
     populous_counties.append(cnty)
-  return sorted(populous_counties)
+  return populous_counties
 
 # Get county features like [age, income, education, (race, ethnicity, well_being)]
 def get_county_factors(cursor, base_year, relevant_counties, normalize=False):
@@ -94,13 +107,13 @@ def get_topic_map(cursor):
   return topic_map
 
 # Iterate over all time units to create county_topics[county][year_week] = topics
-def get_county_topics(cursor, time_units, relevant_counties):
+def get_county_topics(cursor, table_years, relevant_counties):
   county_topics = {}
-  for time_unit in time_units:
-    print('Processing {}'.format(time_unit))
+  for table_year in table_years:
+    print('Processing {}'.format(table_year))
 
     # TODO change to CTLB
-    sql = "select * from county_topic_change.feat$cat_met_a30_2000_cp_w$msgs_100u_{}$cnty$1gra;".format(time_unit)
+    sql = "select * from county_topic_change.feat$cat_met_a30_2000_cp_w$msgs_100u_{}$cnty$1gra;".format(table_year)
     cursor.execute(sql)
 
     for result in tqdm(cursor.fetchall_unbuffered()): # Read _unbuffered() to save memory
@@ -110,19 +123,33 @@ def get_county_topics(cursor, time_units, relevant_counties):
       topic_num = int(topic_num)
       county = str(county).zfill(5)
 
-      # Which counties are relevant?
-      if county not in relevant_counties:
-        continue
-
       # Store county_topics
+      # TODO replace table_year with yearweek
       if county_topics.get(county) is None:
         county_topics[county] = {}
-      if county_topics[county].get(time_unit) is None:
-        county_topics[county][time_unit] = np.zeros(num_topics)
-      county_topics[county][time_unit][topic_num] = value_norm
+      if county_topics[county].get(table_year) is None:
+        county_topics[county][table_year] = [0] * num_topics
+      county_topics[county][table_year][topic_num] = value_norm
 
   return county_topics
 
+def avg_topic_usage(county,center_date,window_radius=diff_window_radius):
+    # TODO add utility method that can turn a date into an index and vice versa
+    center_date = int(center_date)
+
+    start_window = center_date - window_radius
+    end_window = center_date + window_radius
+    sum = np.zeros(num_topics)
+    counter = 0
+
+    # TODO remove dwebug statements
+    print(county)
+    print(start_window)
+    print(end_window)
+    print(sum)
+    print(counter)
+
+    return
 
 # Read in data with cursor
 with connection:
@@ -139,7 +166,8 @@ with connection:
     print('\nCounty factor matrix shape:',county_factors.shape)
 
     # Display nearest neighbors for first county
-    test_county = '36103'
+    test_county = '36103' # Suffolk, NY
+    test_county = '11001' # Washington, DC
     test_county_index = list(populous_counties).index(test_county)
     print('\nTest county (',test_county,')\n',county_factors[test_county_index])
     dist, n_neighbors = neighbors.kneighbors([county_factors[test_county_index]], 6, return_distance=True)
@@ -148,18 +176,67 @@ with connection:
 
     # Map topics to their key words
     topic_map = get_topic_map(cursor)
-    print('\nTopic 0 =',topic_map['0'])
-    print('Topic 344 =',topic_map['344'])
-    print('Topic 160 =',topic_map['160'])
+    print()
+    print('Topic 0    =',topic_map['0'])
+    print('Topic 344  =',topic_map['344'])
+    print('Topic 160  =',topic_map['160'])
     print('Topic 1999 =',topic_map['1999'],'\n')
 
-    # TODO remove
-    sys.exit(0)
+    # TODO research design below
+
+    # Find the topic vector per user per year_week
+    # user_topic_usage[county][yw]
+
+    # A counties' topic usage in a yw is the average of the topic vectors of users living in that county
+    # county_topic_usage[county][yw]
+
+    # Calculate null distributions
 
     # Get county topic information
-    time_units = list(range(2012, 2017))
-    county_topics = get_county_topics(cursor,time_units,populous_counties)
-    print("county_topics['06077'][2012]",county_topics['06077'][2012],'\n')
-    print("county_topics['06077'][2013]",county_topics['06077'][2013],'\n')
-    print("county_topics['06077'][2016]",county_topics['06077'][2016],'\n')
+    county_topics_json = "county_topics.json"
+
+    if not os.path.isfile(county_topics_json):
+        table_years = list(range(2012, 2017))
+        county_topics = get_county_topics(cursor,table_years,populous_counties)
+        with open(county_topics_json,"w") as json_file: json.dump(county_topics,json_file)
+    print("Importing produced county topics")
+    with open(county_topics_json) as json_file: county_topics = json.load(json_file)
+
+    print("county_topics['06077']['2012'] =",county_topics['06077']['2012'][:5],'\n')
+    print("county_topics['06077']['2013'] =",county_topics['06077']['2013'][:5],'\n')
+    print("county_topics['06077']['2014'] =",county_topics['06077']['2014'][:5],'\n')
+    print("county_topics['06077']['2015'] =",county_topics['06077']['2015'][:5],'\n')
+    print("county_topics['06077']['2016'] =",county_topics['06077']['2016'][:5],'\n')
+
+    # Get the closest k_neighbors for each populous_county we want to examine
+    null_counties = {}
+    for target in populous_counties:
+        # TODO get the intervention timing for the county
+        # target_timing = county_events[target]
+        target_timing = '2014' # TODO remove hardcoded
+
+        # Get the k top neighbors
+        county_index = list(populous_counties).index(target)
+        n_neighbors = neighbors.kneighbors([county_factors[county_index]], k_neighbors + 1, return_distance=False)
+        null_counties[target] = []
+        for i, n in enumerate(n_neighbors[0][1:]): # skip 0th entry (self)
+            ith_closest_county = populous_counties[n]
+
+            # TODO filter out counties with county events close by in time
+            # if abs(county_events[ith_closest_county] - target_timing) < event_timing_buffer: continue
+
+            null_counties[target].append(ith_closest_county)
+
+    # TODO Calculate diff in diffs
+    for target in populous_counties:
+        # TODO get the intervention timing for the county
+        # target_timing = county_events[target]
+        target_timing = '2014' # TODO remove hardcoded
+
+        avg_topic_usage(target, target_timing)
+        break # TODO remove
+
+    # TODO Calculate average difference between targets and nulls
+
+
 
