@@ -29,7 +29,7 @@ k_neighbors = 30
 # Diff in Diff Windows
 event_timing_buffer = 4 # weeks before/after target event that are unaffected
 diff_radius = 2 # distance in weeks from the middle of target event
-diff_window_radius = 0 # how far to look around
+diff_window_radius = 1 # how far to look around
 
 # TODO define events on a per county basis
 event_date_dict = {}
@@ -133,23 +133,38 @@ def get_county_topics(cursor, table_years, relevant_counties):
 
   return county_topics
 
-def avg_topic_usage(county,center_date,window_radius=diff_window_radius):
-    # TODO add utility method that can turn a date into an index and vice versa
-    center_date = int(center_date)
+# Changes for new problems
+def date_to_index(date, invert=False):
+    # TODO extend to handle yearweeks
+    if invert:
+        return str(date)
+    else:
+        return int(date)
 
+def avg_topic_usage(county,center_date,window_radius=diff_window_radius):
+
+    # Determine indices of dates to check
+    center_date = date_to_index(center_date)
     start_window = center_date - window_radius
     end_window = center_date + window_radius
+
     sum = np.zeros(num_topics)
     counter = 0
+    for date in range(start_window,end_window+1):
+        str_date = date_to_index(date,invert=True)
+        if county_topics.get(county).get(str_date):
+            topics_for_date = np.array(county_topics[county][str_date])
+            sum = np.add(sum, topics_for_date)
+            counter += 1
+            # print("->",county,date,topics_for_date)
 
-    # TODO remove dwebug statements
-    print(county)
-    print(start_window)
-    print(end_window)
-    print(sum)
-    print(counter)
-
-    return
+    if counter > 0:
+        avg =  sum / counter
+        # print("avg = ",avg)
+        return avg
+    else:
+        print("No matching dates for", county,center_date,window_radius)
+        return sum
 
 # Read in data with cursor
 with connection:
@@ -228,13 +243,19 @@ with connection:
             null_counties[target].append(ith_closest_county)
 
     # TODO Calculate diff in diffs
+    assert(diff_radius <= 2 * diff_window_radius)
     for target in populous_counties:
         # TODO get the intervention timing for the county
         # target_timing = county_events[target]
-        target_timing = '2014' # TODO remove hardcoded
+        target_timing = '2013' # TODO remove hardcoded
 
         avg_topic_usage(target, target_timing)
-        break # TODO remove
+
+        null_counties_considered = null_counties[target]
+        for null_county in null_counties_considered:
+            continue
+
+        break # TODO only for testing
 
     # TODO Calculate average difference between targets and nulls
 
