@@ -197,16 +197,6 @@ with connection:
     print('Topic 160  =',topic_map['160'])
     print('Topic 1999 =',topic_map['1999'],'\n')
 
-    # TODO research design below
-
-    # Find the topic vector per user per year_week
-    # user_topic_usage[county][yw]
-
-    # A counties' topic usage in a yw is the average of the topic vectors of users living in that county
-    # county_topic_usage[county][yw]
-
-    # Calculate null distributions
-
     # Get county topic information
     county_topics_json = "county_topics.json"
 
@@ -227,8 +217,8 @@ with connection:
     null_counties = {}
     for target in populous_counties:
         # TODO get the intervention timing for the county
-        # target_timing = county_events[target]
-        target_timing = '2014' # TODO remove hardcoded
+        # target_event = county_events[target]
+        target_event = '2014' # TODO remove hardcoded
 
         # Get the k top neighbors
         county_index = list(populous_counties).index(target)
@@ -238,26 +228,48 @@ with connection:
             ith_closest_county = populous_counties[n]
 
             # TODO filter out counties with county events close by in time
-            # if abs(county_events[ith_closest_county] - target_timing) < event_timing_buffer: continue
+            # if abs(county_events[ith_closest_county] - target_event) < event_timing_buffer: continue
 
             null_counties[target].append(ith_closest_county)
 
-    # TODO Calculate diff in diffs
+    # Calculate diff in diffs
+    target_diffs = {}
+    null_diffs = {}
     assert(diff_radius <= 2 * diff_window_radius)
     for target in populous_counties:
         # TODO get the intervention timing for the county
-        # target_timing = county_events[target]
-        target_timing = '2013' # TODO remove hardcoded
+        # target_event = county_events[target]
+        target_event = '2014' # TODO remove hardcoded
+        target_event = date_to_index(target_event)
 
-        avg_topic_usage(target, target_timing)
+        before_target_event = target_event - diff_radius
+        after_target_event = target_event + diff_radius
+
+        target_before = avg_topic_usage(target, before_target_event)
+        target_after = avg_topic_usage(target, after_target_event)
+        target_diff = np.subtract(target_after,target_before)
+
+        target_diffs[target] = target_diff
 
         null_counties_considered = null_counties[target]
+        avg_null_diff = np.zeros(num_topics)
         for null_county in null_counties_considered:
-            continue
+            null_before = avg_topic_usage(null_county, before_target_event)
+            null_after = avg_topic_usage(null_county, after_target_event)
+            null_diff = np.subtract(null_after,null_before)
+
+            # Add all differences, then divide by num of considered counties
+            avg_null_diff = np.add(avg_null_diff, null_diff)
+
+        # Average change from all null counties
+        null_diffs[target] = avg_null_diff / len(null_counties_considered)
+
+        print('target_diffs',target_diffs)
+        print('null_diffs',null_diffs)
 
         break # TODO only for testing
 
-    # TODO Calculate average difference between targets and nulls
+    # TODO Correlate these changes with life satisfaction or other metric
 
 
 
