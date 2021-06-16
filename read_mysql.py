@@ -34,6 +34,14 @@ diff_window_radius = 1 # how far to look around
 # TODO define events on a per county basis
 event_date_dict = {}
 
+# <- 2013 [target_start][target_end] 2015 ->
+# switch to a target start and target_end
+# define a before and after length
+# if a target_end is specified use that range as buffer
+# if a target_end is NOT specified then target_end = target_set 
+# the "after" will always contain target_end, or target_start if no target_end is specified 
+# the "before" does not contain target_start
+
 
 print('Connecting to MySQL...')
 
@@ -141,6 +149,7 @@ def date_to_index(date, invert=False):
     else:
         return int(date)
 
+# TODO change how windowing is done to be based on a start and end
 def avg_topic_usage(county,center_date,window_radius=diff_window_radius):
 
     # Determine indices of dates to check
@@ -261,11 +270,17 @@ with connection:
             # Add all differences, then divide by num of considered counties
             avg_null_diff = np.add(avg_null_diff, null_diff)
 
+            # TODO Capture the standard deviation on top of averages 
+            # the distribution of diffs should be a normal diffs
+
         # Average change from all null counties
+        # TODO change the code to a list so we can get all stats
         null_diffs[target] = avg_null_diff / len(null_counties_considered)
 
         print('target_diffs',target_diffs)
         print('null_diffs',null_diffs)
+
+        # TODO compare changes in avg_matched_counties with the changes in the target_county
 
         break # TODO only for testing
 
