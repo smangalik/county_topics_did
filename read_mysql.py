@@ -27,23 +27,11 @@ county_factors_fields += ",log_pop_density10, percent_black10,percent_white10, f
 k_neighbors = 30
 
 # Diff in Diff Windows
-event_timing_buffer = 4 # weeks before/after target event that are unaffected
-diff_radius = 2 # distance in weeks from the middle of target event
-diff_window_radius = 1 # how far to look around
+default_before_start_window = 2 # additional time periods to consider before event start
+default_after_end_window = 2 # additional time periods to consider after event end
 
 # TODO define events on a per county basis
 event_date_dict = {}
-
-# <- 2013 [target_start][target_end] 2015 ->
-# switch to a target start and target_end
-# define a before and after length
-# if a target_end is specified use that range as buffer
-# if a target_end is NOT specified then target_end = target_set 
-# the "after" will always contain target_end, or target_start if no target_end is specified 
-# the "before" does not contain target_start
-
-# Validate parameters
-assert(diff_radius <= 2 * diff_window_radius)
 
 print('Connecting to MySQL...')
 
@@ -151,31 +139,41 @@ def date_to_index(date, invert=False):
     else:
         return int(date)
 
-# TODO change how windowing is done to be based on a start and end
-def avg_topic_usage(county,center_date,window_radius=diff_window_radius):
+def avg_topic_from_dates(county,dates):
+  topic_usages = []
+  
+  for date in dates:
+    str_date = date_to_index(date,invert=True)
+    if county_topics.get(county).get(str_date):
+      topics_for_date = np.array(county_topics[county][str_date])
+      topic_usages.append(topics_for_date)
 
-    # Determine indices of dates to check
-    center_date = date_to_index(center_date)
-    start_window = center_date - window_radius
-    end_window = center_date + window_radius
+  if len(topic_usages) == 0:
+    print("No matching dates for", county, "on dates", dates)
 
-    sum = np.zeros(num_topics)
-    counter = 0
-    for date in range(start_window,end_window+1):
-        str_date = date_to_index(date,invert=True)
-        if county_topics.get(county).get(str_date):
-            topics_for_date = np.array(county_topics[county][str_date])
-            sum = np.add(sum, topics_for_date)
-            counter += 1
-            # print("->",county,date,topics_for_date)
+  return np.mean(topic_usages, axis=0)
 
-    if counter > 0:
-        avg =  sum / counter
-        # print("avg = ",avg)
-        return avg
-    else:
-        print("No matching dates for", county,center_date,window_radius)
-        return sum
+def topic_usage_before_and_after(county, event_start, event_end=None, before_start_window=default_before_start_window, after_start_window=default_after_end_window):
+
+  # Parse start and end of event
+  if event_end == None:
+    event_end = event_start
+  if not isinstance(event_start, int):
+    event_start = date_to_index(event_start)
+  if not isinstance(event_end, int):
+    event_end = date_to_index(event_end)
+
+  # Before window dates
+  before_dates = list(range(event_start - before_start_window - 1, event_start))
+  #print('before',before_dates)
+
+  # After window dates
+  after_dates = list(range(event_end, event_end + after_start_window + 1))
+  #print('after',after_dates)
+
+  # Get average usage
+  return avg_topic_from_dates(county, before_dates), avg_topic_from_dates(county, after_dates)
+
 
 # Read in data with cursor
 with connection:
@@ -248,15 +246,10 @@ with connection:
     matched_diffs = {}
     for target in populous_counties:
         # TODO get the intervention timing for the county
-        # target_event = county_events[target]
-        target_event = '2014' # TODO remove hardcoded
-        target_event = date_to_index(target_event)
+        # target_event_start,target_event_end = county_events[target]
+        target_event_start,target_event_end = '2014','2015' # TODO remove hardcoded
 
-        before_target_event = target_event - diff_radius
-        after_target_event = target_event + diff_radius
-
-        target_before = avg_topic_usage(target, before_target_event)
-        target_after = avg_topic_usage(target, after_target_event)
+        target_before, target_after = topic_usage_before_and_after(target, event_start=target_event_start, event_end=target_event_end)
         target_diff = np.subtract(target_after,target_before)
 
         target_diffs[target] = target_diff
@@ -264,8 +257,7 @@ with connection:
         matched_counties_considered = matched_counties[target]
         matched_diffs[target] = []
         for matched_county in matched_counties_considered:
-            matched_before = avg_topic_usage(matched_county, before_target_event)
-            matched_after = avg_topic_usage(matched_county, after_target_event)
+            matched_before, matched_after = topic_usage_before_and_after(matched_county, event_start=target_event_start, event_end=target_event_end)
             matched_diff = np.subtract(matched_after,matched_before)
 
             # Add all differences, then divide by num of considered counties
@@ -274,8 +266,7 @@ with connection:
         print('target_diffs',target_diffs)
         print('matched_diffs',matched_diffs)
 
-        # Average change from all matched counties
-        # TODO change the code to a list so we can get all stats
+        # Average/std change from all matched counties
         avg_matched_diff = np.mean(matched_diffs[target], axis=0)
         std_matched_diff = np.std(matched_diffs[target], axis=0)
         print("Average change in matched counties:", avg_matched_diff)
