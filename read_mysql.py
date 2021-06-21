@@ -42,6 +42,8 @@ event_date_dict = {}
 # the "after" will always contain target_end, or target_start if no target_end is specified 
 # the "before" does not contain target_start
 
+# Validate parameters
+assert(diff_radius <= 2 * diff_window_radius)
 
 print('Connecting to MySQL...')
 
@@ -223,7 +225,7 @@ with connection:
     print("county_topics['06077']['2016'] =",county_topics['06077']['2016'][:5],'\n')
 
     # Get the closest k_neighbors for each populous_county we want to examine
-    null_counties = {}
+    matched_counties = {}
     for target in populous_counties:
         # TODO get the intervention timing for the county
         # target_event = county_events[target]
@@ -232,19 +234,18 @@ with connection:
         # Get the k top neighbors
         county_index = list(populous_counties).index(target)
         n_neighbors = neighbors.kneighbors([county_factors[county_index]], k_neighbors + 1, return_distance=False)
-        null_counties[target] = []
+        matched_counties[target] = []
         for i, n in enumerate(n_neighbors[0][1:]): # skip 0th entry (self)
             ith_closest_county = populous_counties[n]
 
             # TODO filter out counties with county events close by in time
             # if abs(county_events[ith_closest_county] - target_event) < event_timing_buffer: continue
 
-            null_counties[target].append(ith_closest_county)
+            matched_counties[target].append(ith_closest_county)
 
     # Calculate diff in diffs
     target_diffs = {}
-    null_diffs = {}
-    assert(diff_radius <= 2 * diff_window_radius)
+    matched_diffs = {}
     for target in populous_counties:
         # TODO get the intervention timing for the county
         # target_event = county_events[target]
@@ -260,31 +261,28 @@ with connection:
 
         target_diffs[target] = target_diff
 
-        null_counties_considered = null_counties[target]
-        avg_null_diff = np.zeros(num_topics)
-        for null_county in null_counties_considered:
-            null_before = avg_topic_usage(null_county, before_target_event)
-            null_after = avg_topic_usage(null_county, after_target_event)
-            null_diff = np.subtract(null_after,null_before)
+        matched_counties_considered = matched_counties[target]
+        matched_diffs[target] = []
+        for matched_county in matched_counties_considered:
+            matched_before = avg_topic_usage(matched_county, before_target_event)
+            matched_after = avg_topic_usage(matched_county, after_target_event)
+            matched_diff = np.subtract(matched_after,matched_before)
 
             # Add all differences, then divide by num of considered counties
-            avg_null_diff = np.add(avg_null_diff, null_diff)
-
-            # TODO Capture the standard deviation on top of averages 
-            # the distribution of diffs should be a normal diffs
-
-        # Average change from all null counties
-        # TODO change the code to a list so we can get all stats
-        null_diffs[target] = avg_null_diff / len(null_counties_considered)
+            matched_diffs[target].append(matched_diff)
 
         print('target_diffs',target_diffs)
-        print('null_diffs',null_diffs)
+        print('matched_diffs',matched_diffs)
+
+        # Average change from all matched counties
+        # TODO change the code to a list so we can get all stats
+        avg_matched_diff = np.mean(matched_diffs[target], axis=0)
+        std_matched_diff = np.std(matched_diffs[target], axis=0)
+        print("Average change in matched counties:", avg_matched_diff)
+        print("std. dev. change in matched counties:", avg_matched_diff)
 
         # TODO compare changes in avg_matched_counties with the changes in the target_county
-
+        
         break # TODO only for testing
 
     # TODO Correlate these changes with life satisfaction or other metric
-
-
-
