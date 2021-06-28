@@ -90,10 +90,6 @@ def get_county_factors(cursor, base_year, relevant_counties, normalize=False):
 
   return county_factors, neighbors, relevant_counties
 
-# Get nearest neighbors
-def get_nearest_neighbors(county_factors_entry):
-    pass
-
 # Get category map from topic number to top words
 def get_topic_map(cursor):
   topic_map = {}
@@ -223,6 +219,8 @@ with connection:
     print("county_topics['06077']['2016'] =",county_topics['06077']['2016'][:5],'\n')
 
     # Get the closest k_neighbors for each populous_county we want to examine
+    county_representation = {}
+
     matched_counties = {}
     for target in populous_counties:
         # TODO get the intervention timing for the county
@@ -236,10 +234,17 @@ with connection:
         for i, n in enumerate(n_neighbors[0][1:]): # skip 0th entry (self)
             ith_closest_county = populous_counties[n]
 
+            # determine how much each county appears
+            if ith_closest_county not in county_representation.keys():
+              county_representation[ith_closest_county] = 0
+            county_representation[ith_closest_county] += 1
+
             # TODO filter out counties with county events close by in time
             # if abs(county_events[ith_closest_county] - target_event) < event_timing_buffer: continue
 
             matched_counties[target].append(ith_closest_county)
+
+    print("\nCount of times _ is a neighbor\n", sorted(county_representation.items(), key=lambda kv: kv[1]), '\n')
 
     # Calculate diff in diffs
     target_diffs = {}
@@ -269,7 +274,7 @@ with connection:
         # Average/std change from all matched counties
         avg_matched_diff = np.mean(matched_diffs[target], axis=0)
         std_matched_diff = np.std(matched_diffs[target], axis=0)
-        print("Average change in matched counties:", avg_matched_diff)
+        print("\nAverage change in matched counties:", avg_matched_diff)
         print("std. dev. change in matched counties:", avg_matched_diff)
 
         # TODO compare changes in avg_matched_counties with the changes in the target_county
