@@ -30,8 +30,8 @@ k_neighbors = 30
 default_before_start_window = 2 # additional time periods to consider before event start
 default_after_end_window = 2 # additional time periods to consider after event end
 
-# TODO define events on a per county basis
-event_date_dict = {}
+# TODO event_date_dict[county] = [event_start, event_end]
+county_events = {}
 
 print('Connecting to MySQL...')
 
@@ -118,7 +118,7 @@ def get_county_topics(cursor, table_years, relevant_counties):
       county = str(county).zfill(5)
 
       # Store county_topics
-      # TODO replace table_year with yearweek
+      # TODO replace table_year with yearweek, from splitting the county_yw
       if county_topics.get(county) is None:
         county_topics[county] = {}
       if county_topics[county].get(table_year) is None:
@@ -129,7 +129,7 @@ def get_county_topics(cursor, table_years, relevant_counties):
 
 # Changes for new problems
 def date_to_index(date, invert=False):
-    # TODO extend to handle yearweeks
+    # TODO modify to handle yearweeks
     if invert:
         return str(date)
     else:
@@ -223,8 +223,7 @@ with connection:
 
     matched_counties = {}
     for target in populous_counties:
-        # TODO get the intervention timing for the county
-        # target_event = county_events[target]
+        target_event_start,target_event_end = county_events.get(target,[None,None])
         target_event = '2014' # TODO remove hardcoded
 
         # Get the k top neighbors
@@ -240,7 +239,8 @@ with connection:
             county_representation[ith_closest_county] += 1
 
             # TODO filter out counties with county events close by in time
-            # if abs(county_events[ith_closest_county] - target_event) < event_timing_buffer: continue
+            ith_closest_county_event, _ = county_events.get(ith_closest_county,[None,None])
+            # if abs(ith_closest_county_event - target_event) < event_timing_buffer: continue
 
             matched_counties[target].append(ith_closest_county)
 
@@ -250,8 +250,7 @@ with connection:
     target_diffs = {}
     matched_diffs = {}
     for target in populous_counties:
-        # TODO get the intervention timing for the county
-        # target_event_start,target_event_end = county_events[target]
+        target_event_start,target_event_end = county_events.get(target,[None,None])
         target_event_start,target_event_end = '2014','2015' # TODO remove hardcoded
 
         target_before, target_after = topic_usage_before_and_after(target, event_start=target_event_start, event_end=target_event_end)
@@ -277,8 +276,14 @@ with connection:
         print("\nAverage change in matched counties:", avg_matched_diff)
         print("std. dev. change in matched counties:", avg_matched_diff)
 
-        # TODO compare changes in avg_matched_counties with the changes in the target_county
+        # compare changes in avg_matched_counties with the changes in the target_county
+        print()
+        print("Target Before:\n", target_before)
+        print("Target After (with intervention):\n", target_after)
+        print("Target After (without intervention):\n", target_before + avg_matched_diff)
+        print("Intervention Effect:\n", target_after - (target_before + avg_matched_diff))
         
-        break # TODO only for testing
-
+        break # TODO remove when done testing
     # TODO Correlate these changes with life satisfaction or other metric
+
+    print()
