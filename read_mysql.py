@@ -1,3 +1,5 @@
+# run as `python3 read_mysql.py`
+
 from pymysql import cursors, connect
 import warnings
 import numpy as np
@@ -7,13 +9,14 @@ from sklearn.neighbors import NearestNeighbors
 from scipy import stats
 import json
 import os.path
+import matplotlib.pyplot as plt
 
 # Ignore warnings
 warnings.catch_warnings()
 warnings.simplefilter("ignore")
 
 # How many of the top populous counties we want to keep
-top_county_count = 100
+top_county_count = 300
 
 # Number of topics studied
 num_topics = 2000
@@ -93,7 +96,7 @@ def get_county_factors(cursor, base_year, relevant_counties, normalize=False):
 # Get category map from topic number to top words
 def get_topic_map(cursor):
   topic_map = {}
-  sql = 'select category, group_concat(term order by weight desc) as "terms" from dlatk_lexica.met_a30_2000_cp group by category;'
+  sql = 'select category, group_concat(term order by weight desc) as "terms" from dlatk_lexica.met_a30_2000_freq_t50ll group by category;'
   cursor.execute(sql)
   for result in cursor.fetchall():
     category, terms = result
@@ -244,11 +247,13 @@ with connection:
 
             matched_counties[target].append(ith_closest_county)
 
-    print("\nCount of times _ is a neighbor\n", sorted(county_representation.items(), key=lambda kv: kv[1]), '\n')
+    neighbor_counts = sorted(county_representation.items(), key=lambda kv: kv[1])
+    print("\nCount of times _ is a neighbor\n", neighbor_counts[:10],"...",neighbor_counts[-10:], '\n')
 
     # Calculate diff in diffs
     target_diffs = {}
     matched_diffs = {}
+    matched_befores = {}
     for target in populous_counties:
         target_event_start,target_event_end = county_events.get(target,[None,None])
         target_event_start,target_event_end = '2014','2015' # TODO remove hardcoded
@@ -260,30 +265,83 @@ with connection:
 
         matched_counties_considered = matched_counties[target]
         matched_diffs[target] = []
+        matched_befores[target] = []
         for matched_county in matched_counties_considered:
             matched_before, matched_after = topic_usage_before_and_after(matched_county, event_start=target_event_start, event_end=target_event_end)
             matched_diff = np.subtract(matched_after,matched_before)
 
             # Add all differences, then divide by num of considered counties
             matched_diffs[target].append(matched_diff)
+            matched_befores[target].append(matched_before)
 
-        print('target_diffs',target_diffs)
-        print('matched_diffs',matched_diffs)
+        # print('target_diffs',target_diffs)
+        # print('matched_diffs',matched_diffs)
 
         # Average/std change from all matched counties
         avg_matched_diff = np.mean(matched_diffs[target], axis=0)
         std_matched_diff = np.std(matched_diffs[target], axis=0)
-        print("\nAverage change in matched counties:", avg_matched_diff)
-        print("std. dev. change in matched counties:", avg_matched_diff)
+        # print("\nAverage change in matched counties:", avg_matched_diff)
+        # print("std. dev. change in matched counties:", avg_matched_diff)
+
+        # Diff in Diff
+        target_expected = target_before + avg_matched_diff
+        intervention_effects = target_after - target_expected
 
         # compare changes in avg_matched_counties with the changes in the target_county
-        print()
-        print("Target Before:\n", target_before)
-        print("Target After (with intervention):\n", target_after)
-        print("Target After (without intervention):\n", target_before + avg_matched_diff)
-        print("Intervention Effect:\n", target_after - (target_before + avg_matched_diff))
+        # print()
+        # print("Target Before:\n", target_before)
+        # print("Target After (with intervention / observation)\n", target_after)
+        # print("Target After (without intervention / expected):\n", target_expected)
+        # print("Intervention Effect:\n", intervention_effects)
         
+        # Plot findings
+        for feature_num in range(25): # TODO run on ALL topics
+          x = [2014,2015]
+          matches_before = np.array(matched_befores[target])
+          matches_after = np.array(matched_befores[target]) + np.array(matched_diffs[target])
+          avg_match_before = np.mean(matches_before[:,feature_num])
+          avg_match_after = np.mean(matches_after[:,feature_num])
+          std_match_before = np.std(matches_before[:,feature_num])
+          std_match_after = np.std(matches_after[:,feature_num])
+
+          is_significant = abs(intervention_effects[feature_num]) > std_match_after*2
+
+          if not is_significant:
+            continue
+
+          ci_down = [target_before[feature_num]-std_match_before, target_expected[feature_num]-std_match_after]
+          ci_up = [target_before[feature_num]+std_match_before, target_expected[feature_num]+std_match_after]
+          ci_down_2 = [target_before[feature_num]-std_match_before*2, target_expected[feature_num]-std_match_after*2]
+          ci_up_2 = [target_before[feature_num]+std_match_before*2, target_expected[feature_num]+std_match_after*2]
+
+          plt.clf() # reset plot
+          plt.plot(x, [target_before[feature_num], target_after[feature_num]], 'b-', label='Target (Actual)')
+          plt.plot(x, [target_before[feature_num], target_expected[feature_num]],'c--', label='Target (Expected)')
+          plt.plot([x[0]]*30, matches_before[:,feature_num], 'r+', alpha=0.2)
+          plt.plot([x[1]]*30, matches_after[:,feature_num], 'r+', alpha=0.2)
+          #plt.plot(x,[avg_match_before,avg_match_after],'r--',label='Average Match')
+          plt.fill_between(x, ci_down, ci_up, color='c', alpha=0.25)
+          plt.fill_between(x, ci_down_2, ci_up_2, color='c', alpha=0.1)
+          plt.plot([x[1],x[1]], [target_after[feature_num], target_expected[feature_num]], 'k--', label='Intervention Effect')
+          plt.title("Diff in Diff Analysis for County " + str(target))
+          plt.xticks([],[])
+          plt.xlabel("Time")
+          plt.ylabel(str(topic_map[str(feature_num)][:4]) + " Usage")
+
+          y_max = 1.05 * max(target_before[feature_num], target_after[feature_num], target_expected[feature_num], avg_match_before, avg_match_after)
+          y_min = 0.95 * min(target_before[feature_num], target_after[feature_num], target_expected[feature_num], avg_match_before, avg_match_after)
+          #plt.ylim(y_min, y_max)
+          plt.legend()
+          
+          plt_name = "did_topic{}_cnty{}_time{}-{}.png".format(feature_num,target,x[0],x[1])
+          if is_significant:
+            print("Finding for topic",feature_num,"is significant!")
+            plt.savefig(plt_name)
+
+        plt.show()
+
         break # TODO remove when done testing
+
     # TODO Correlate these changes with life satisfaction or other metric
 
     print()
