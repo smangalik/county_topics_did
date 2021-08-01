@@ -1,4 +1,4 @@
-# run as `python3 read_mysql.py`
+# run as `python3 process_ctlb.py`
 
 from pymysql import cursors, connect
 import warnings
@@ -45,7 +45,6 @@ connection  = connect(read_default_file="~/.my.cnf")
 # Get the 100 most populous counties
 def get_populous_counties(cursor, base_year):
   populous_counties = []
-  # sql = "select * from county_topic_change.msgs_100u_{} order by num_users desc limit {};".format(base_year,top_county_count)
   sql = "select * from ctlb.counties{} order by num_of_users desc limit {};".format(base_year,top_county_count)
   cursor.execute(sql)
   for result in cursor.fetchall():
@@ -62,7 +61,7 @@ def get_county_factors(cursor, base_year, relevant_counties, normalize=False):
 
   for i, cnty in enumerate(relevant_counties):
       # Get stats
-      # TODO change to CTLB
+      # TODO change to CTLB to get better stats on user tweets [cnty|num_users|num_tweets]
       sql = "select * from county_topic_change.msgs_100u_{} where cnty = {};".format(base_year,cnty)
       cursor.execute(sql)
       result = cursor.fetchone()
@@ -110,26 +109,24 @@ def get_county_topics(cursor, table_years, relevant_counties):
   for table_year in table_years:
     print('Processing {}'.format(table_year))
 
-    # TODO change to CTLB
-    sql = "select * from feat$cat_met_a30_2000_cp_w$timelines{}$yw_cnty$1gra;".format(table_year)
-    sql = "select * from county_topic_change.feat$cat_met_a30_2000_cp_w$msgs_100u_{}$cnty$1gra;".format(table_year)
-
+    sql = "select * from ctlb.feat$cat_met_a30_2000_cp_w$timelines{}$yw_cnty$1gra;".format(table_year)
     cursor.execute(sql)
 
     for result in tqdm(cursor.fetchall_unbuffered()): # Read _unbuffered() to save memory
-      _, county, topic_num, value, value_norm = result
+      yw_county, feat, value, value_norm = result
 
-      if topic_num == '_int': continue
-      topic_num = int(topic_num)
+      if feat == '_int': continue
+      feat = int(feat)
+      yearweek, county = yw_county.split(":")
+      if county == "" or yearweek == "": continue
       county = str(county).zfill(5)
 
       # Store county_topics
-      # TODO replace table_year with yearweek, from splitting the county_yw
       if county_topics.get(county) is None:
         county_topics[county] = {}
-      if county_topics[county].get(table_year) is None:
-        county_topics[county][table_year] = [0] * num_topics
-      county_topics[county][table_year][topic_num] = value_norm
+      if county_topics[county].get(yearweek) is None:
+        county_topics[county][yearweek] = [0] * num_topics
+      county_topics[county][yearweek][feat] = value_norm
 
   return county_topics
 
@@ -138,24 +135,26 @@ def date_to_yearweek(d):
   return str(year) + "_" + str(weeknumber)
 
 # Changes for new problems
-def date_to_index(date, invert=False):
-    # TODO modify to handle datetime to yearweek indices
+def yearweek_to_index(yw, invert=False):
+    # TODO Fix this method to work properly
     if invert:
-        return str(date)
+        week = yw
+        return "2020_" + str(week).zfill(2)
     else:
-        return int(date)
+        year, week = yw.split("_")
+        return int(week)
 
 def avg_topic_from_dates(county,dates):
   topic_usages = []
 
   for date in dates:
-    str_date = date_to_index(date,invert=True)
-    if county_topics.get(county).get(str_date):
-      topics_for_date = np.array(county_topics[county][str_date])
+    if county_topics.get(county).get(date):
+      topics_for_date = np.array(county_topics[county][date])
       topic_usages.append(topics_for_date)
 
   if len(topic_usages) == 0:
     print("No matching dates for", county, "on dates", dates)
+    return None
 
   return np.mean(topic_usages, axis=0)
 
@@ -165,16 +164,18 @@ def topic_usage_before_and_after(county, event_start, event_end=None, before_sta
   if event_end == None:
     event_end = event_start
   if not isinstance(event_start, int):
-    event_start = date_to_index(event_start)
+    event_start = yearweek_to_index(event_start)
   if not isinstance(event_end, int):
-    event_end = date_to_index(event_end)
+    event_end = yearweek_to_index(event_end)
 
   # Before window dates
   before_dates = list(range(event_start - before_start_window - 1, event_start))
+  before_dates = [yearweek_to_index(x,invert=True) for x in before_dates]
   #print('before',before_dates)
 
   # After window dates
   after_dates = list(range(event_end, event_end + after_start_window + 1))
+  after_dates = [yearweek_to_index(x,invert=True) for x in after_dates]
   #print('after',after_dates)
 
   # Get average usage
@@ -189,9 +190,10 @@ with connection:
     # Determine the relevant counties
     base_year = 2019
     populous_counties = get_populous_counties(cursor, base_year)
-    print("\nCounties with the most users in {}".format(base_year),populous_counties)
+    print("\nCounties with the most users in {}".format(base_year),populous_counties[:25],"...")
 
     # Create county_factor matrix and n-neighbors mdoel
+    # TODO use better 2020 data
     county_factors, neighbors, populous_counties = get_county_factors(cursor, 2016, populous_counties)
     print('\nCounty factor matrix shape:',county_factors.shape)
 
@@ -213,28 +215,32 @@ with connection:
     print('Topic 1999 =',topic_map['1999'],'\n')
 
     # Get county topic information
-    county_topics_json = "county_topics.json"
+    county_topics_json = "/data/smangalik/county_topics_ctlb.json"
 
     if not os.path.isfile(county_topics_json):
-        table_years = list(range(2012, 2017))
+        #table_years = list(range(2012, 2017))
+        table_years = [2020] # TODO add 2019
         county_topics = get_county_topics(cursor,table_years,populous_counties)
         with open(county_topics_json,"w") as json_file: json.dump(county_topics,json_file)
     print("Importing produced county topics")
     with open(county_topics_json) as json_file: county_topics = json.load(json_file)
 
-    print("county_topics['06077']['2012'] =",county_topics['06077']['2012'][:5],'\n')
-    print("county_topics['06077']['2013'] =",county_topics['06077']['2013'][:5],'\n')
-    print("county_topics['06077']['2014'] =",county_topics['06077']['2014'][:5],'\n')
-    print("county_topics['06077']['2015'] =",county_topics['06077']['2015'][:5],'\n')
-    print("county_topics['06077']['2016'] =",county_topics['06077']['2016'][:5],'\n')
+    print("county_topics['48117']['2020_07'] =",county_topics['48117']['2020_07'][:5])
+    print("county_topics['11001']['2020_07'] =",county_topics['11001']['2020_07'][:5])
+    print("county_topics['11001']['2020_08'] =",county_topics['11001']['2020_08'][:5])
+    print("county_topics['11001']['2020_09'] =",county_topics['11001']['2020_09'][:5])
+    print("county_topics['11001']['2020_12'] =",county_topics['11001']['2020_12'][:5])
+    print("county_topics['11001']['2020_13'] =",county_topics['11001']['2020_13'][:5])
+    print("county_topics['11001']['2020_14'] =",county_topics['11001']['2020_14'][:5])
+    available_yws = list(county_topics['11001'].keys())
+    available_yws.sort()
+    print("Available weeks for 11001:",  available_yws)
 
     # Get the closest k_neighbors for each populous_county we want to examine
     county_representation = {}
 
     matched_counties = {}
     for target in populous_counties:
-        target_event_start,target_event_end = county_events.get(target,[None,None])
-        target_event = '2014' # TODO remove hardcoded
 
         # Get the k top neighbors
         county_index = list(populous_counties).index(target)
@@ -263,12 +269,14 @@ with connection:
     matched_befores = {}
     for target in populous_counties:
         target_event_start,target_event_end = county_events.get(target,[None,None])
-        target_event_start,target_event_end = '2014','2015' # TODO remove hardcoded
+        target_event_start,target_event_end = '2020_10','2020_11' # TODO remove hardcoded
 
         if target_event_start is None and target_event_end is None:
           continue
 
         target_before, target_after, dates_before, dates_after = topic_usage_before_and_after(target, event_start=target_event_start, event_end=target_event_end)
+        if target_before is None or target_after is None: continue
+
         target_diff = np.subtract(target_after,target_before)
 
         target_diffs[target] = target_diff
@@ -278,6 +286,7 @@ with connection:
         matched_befores[target] = []
         for matched_county in matched_counties_considered:
             matched_before, matched_after, _, _ = topic_usage_before_and_after(matched_county, event_start=target_event_start, event_end=target_event_end)
+            if matched_before is None or matched_after is None: continue
             matched_diff = np.subtract(matched_after,matched_before)
 
             # Add all differences, then divide by num of considered counties
@@ -306,7 +315,7 @@ with connection:
 
         # Plot findings
         for feature_num in range(10): # TODO run on ALL topics
-          x = [datetime.datetime(2012, 1, 1), datetime.datetime(2016, 1, 1)] # TODO calc in between dates
+          x = [datetime.datetime(2020, 2, 20), datetime.datetime(2020, 3, 26)] # TODO calc in between dates
           matches_before = np.array(matched_befores[target])
           matches_after = np.array(matched_befores[target]) + np.array(matched_diffs[target])
           avg_match_before = np.mean(matches_before[:,feature_num])
@@ -344,12 +353,12 @@ with connection:
 
           # Format plot
           plt.gcf().autofmt_xdate()
-          #ax.set_xticks(x) # TODO indicate the entire windows being used for the before and after?
           ax.set_xticks([
-            datetime.datetime(int(dates_before[0]), 1, 1),  # begin before
-            datetime.datetime(int(dates_before[-1]), 1, 1), # end before
-            datetime.datetime(int(dates_after[0]), 1, 1),   # begin after
-            datetime.datetime(int(dates_after[-1]), 1, 1),  # end after
+            # TODO weeks start on Mondays and end on Sundays, calculate these dates
+            datetime.datetime(2020, 2, 10),  # begin before
+            datetime.datetime(2020, 3, 1),   # end before
+            datetime.datetime(2020, 3, 16),  # begin after
+            datetime.datetime(2020, 4, 5),   # end after
           ])
           plt.xlabel("Time".format(dates_before,dates_after))
           plt.ylabel(str(topic_map[str(feature_num)][:4]) + " Usage")
@@ -363,8 +372,10 @@ with connection:
 
         # plt.show()
 
-        break # TODO remove when done testing
+        # TODO remove when done testing
+        print("Closing early\n")
+        sys.exit(0)
 
     # TODO Correlate these changes with life satisfaction or other metric
 
-    print()
+    pass
