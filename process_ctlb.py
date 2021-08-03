@@ -31,11 +31,13 @@ county_factors_fields += ",log_pop_density10, percent_black10,percent_white10, f
 k_neighbors = 30
 
 # Diff in Diff Windows
-default_before_start_window = 2 # additional time periods to consider before event start
-default_after_end_window = 2 # additional time periods to consider after event end
+default_before_start_window = 2 # additional days to consider before event start
+default_after_end_window = 2 # additional days to consider after event end
 
-# TODO event_date_dict[county] = [event_start, event_end]
+# TODO populate without hardcoding
+# event_date_dict[county] = [event_start (datetime, exclusive), event_end (datetime, inclusive)]
 county_events = {}
+county_events['11001'] = [datetime.datetime(2020, 5, 25), datetime.datetime(2020, 6, 21)]
 
 print('Connecting to MySQL...')
 
@@ -130,19 +132,21 @@ def get_county_topics(cursor, table_years, relevant_counties):
 
   return county_topics
 
+# Returns the yearweek that the date is within
 def date_to_yearweek(d):
   year, weeknumber, weekday = d.date().isocalendar()
   return str(year) + "_" + str(weeknumber)
 
-# Changes for new problems
-def yearweek_to_index(yw, invert=False):
-    # TODO Fix this method to work properly
-    if invert:
-        week = yw
-        return "2020_" + str(week).zfill(2)
-    else:
-        year, week = yw.split("_")
-        return int(week)
+# Returns the first and last day of a week given as "2020_11"
+def yearweek_to_dates(yw):
+  year, week = yw.split("_")
+  year, week = int(year), int(week)
+
+  first = datetime.datetime(year, 1, 1)
+  base = 1 if first.isocalendar()[1] == 1 else 8
+  monday = first + datetime.timedelta(days=base - first.isocalendar()[2] + 7 * (week - 1))
+  sunday = monday + datetime.timedelta(days=6)
+  return monday, sunday
 
 def avg_topic_from_dates(county,dates):
   topic_usages = []
@@ -163,19 +167,25 @@ def topic_usage_before_and_after(county, event_start, event_end=None, before_sta
   # Parse start and end of event
   if event_end == None:
     event_end = event_start
-  if not isinstance(event_start, int):
-    event_start = yearweek_to_index(event_start)
-  if not isinstance(event_end, int):
-    event_end = yearweek_to_index(event_end)
 
-  # Before window dates
-  before_dates = list(range(event_start - before_start_window - 1, event_start))
-  before_dates = [yearweek_to_index(x,invert=True) for x in before_dates]
+  # Before window dates, ex. '2020_11',2 -> ['2020_08', '2020_09', '2020_10']
+  before_dates = []
+  for i in range(1,before_start_window + 2):
+    day = event_start - datetime.timedelta(weeks=i)
+    before_dates.append(day)
+  before_dates = [date_to_yearweek(x) for x in before_dates]
+  before_dates = list(set(before_dates))
+  before_dates.sort()
   #print('before',before_dates)
 
-  # After window dates
-  after_dates = list(range(event_end, event_end + after_start_window + 1))
-  after_dates = [yearweek_to_index(x,invert=True) for x in after_dates]
+  # After window dates, ex. '2020_11',2 -> ['2020_11', '2020_12', '2020_13']
+  after_dates = []
+  for i in range(after_start_window + 1):
+    day = event_end + datetime.timedelta(weeks=i)
+    after_dates.append(day)
+  after_dates = [date_to_yearweek(x) for x in after_dates]
+  after_dates = list(set(after_dates))
+  after_dates.sort()
   #print('after',after_dates)
 
   # Get average usage
@@ -193,7 +203,7 @@ with connection:
     print("\nCounties with the most users in {}".format(base_year),populous_counties[:25],"...")
 
     # Create county_factor matrix and n-neighbors mdoel
-    # TODO use better 2020 data
+    # TODO use better 2020 data in general
     county_factors, neighbors, populous_counties = get_county_factors(cursor, 2016, populous_counties)
     print('\nCounty factor matrix shape:',county_factors.shape)
 
@@ -225,16 +235,16 @@ with connection:
     print("Importing produced county topics")
     with open(county_topics_json) as json_file: county_topics = json.load(json_file)
 
-    print("county_topics['48117']['2020_07'] =",county_topics['48117']['2020_07'][:5])
-    print("county_topics['11001']['2020_07'] =",county_topics['11001']['2020_07'][:5])
-    print("county_topics['11001']['2020_08'] =",county_topics['11001']['2020_08'][:5])
-    print("county_topics['11001']['2020_09'] =",county_topics['11001']['2020_09'][:5])
-    print("county_topics['11001']['2020_12'] =",county_topics['11001']['2020_12'][:5])
-    print("county_topics['11001']['2020_13'] =",county_topics['11001']['2020_13'][:5])
-    print("county_topics['11001']['2020_14'] =",county_topics['11001']['2020_14'][:5])
+    print("county_topics['48117']['2020_19'] =",county_topics['48117']['2020_19'][:4],"...")
+    print("county_topics['11001']['2020_19'] =",county_topics['11001']['2020_19'][:4],"...")
+    print("county_topics['11001']['2020_20'] =",county_topics['11001']['2020_20'][:4],"...")
+    print("county_topics['11001']['2020_21'] =",county_topics['11001']['2020_21'][:4],"...")
+    print("county_topics['11001']['2020_25'] =",county_topics['11001']['2020_25'][:4],"...")
+    print("county_topics['11001']['2020_26'] =",county_topics['11001']['2020_26'][:4],"...")
+    print("county_topics['11001']['2020_27'] =",county_topics['11001']['2020_27'][:4],"...")
     available_yws = list(county_topics['11001'].keys())
     available_yws.sort()
-    print("Available weeks for 11001:",  available_yws)
+    print("\nAvailable weeks for 11001:",  available_yws)
 
     # Get the closest k_neighbors for each populous_county we want to examine
     county_representation = {}
@@ -268,14 +278,16 @@ with connection:
     matched_diffs = {}
     matched_befores = {}
     for target in populous_counties:
-        target_event_start,target_event_end = county_events.get(target,[None,None])
-        target_event_start,target_event_end = '2020_10','2020_11' # TODO remove hardcoded
+        target_event_start, target_event_end = county_events.get(target,[None,None])
 
         if target_event_start is None and target_event_end is None:
           continue
 
         target_before, target_after, dates_before, dates_after = topic_usage_before_and_after(target, event_start=target_event_start, event_end=target_event_end)
         if target_before is None or target_after is None: continue
+
+        #print('dates_before',dates_before)
+        #print('dates_after',dates_after)
 
         target_diff = np.subtract(target_after,target_before)
 
@@ -311,11 +323,22 @@ with connection:
         # print("Target Before:\n", target_before)
         # print("Target After (with intervention / observation)\n", target_after)
         # print("Target After (without intervention / expected):\n", target_expected)
-        # print("Intervention Effect:\n", intervention_effects)
+        # print("Intervention Effect:\n", intervention_effects)]
+
+        # Relevant Dates
+        begin_before, _ = yearweek_to_dates(min(dates_before))
+        _, end_before = yearweek_to_dates(max(dates_before))
+        begin_after, _ = yearweek_to_dates(min(dates_after))
+        _, end_after = yearweek_to_dates(max(dates_after))
+        middle_before = begin_before + (end_before - begin_before)/2
+        middle_after = begin_after + (end_after - begin_after)/2
+
+        # Calculate in-between dates and xticks
+        x = [middle_before, middle_after]
+        xticks = [begin_before, end_before, begin_after, end_after]
 
         # Plot findings
         for feature_num in range(10): # TODO run on ALL topics
-          x = [datetime.datetime(2020, 2, 20), datetime.datetime(2020, 3, 26)] # TODO calc in between dates
           matches_before = np.array(matched_befores[target])
           matches_after = np.array(matched_befores[target]) + np.array(matched_diffs[target])
           avg_match_before = np.mean(matches_before[:,feature_num])
@@ -345,7 +368,7 @@ with connection:
           plt.plot(x, [target_before[feature_num], target_expected[feature_num]],'c--', label='Target (Expected)')
           plt.plot([x[0]]*30, matches_before[:,feature_num], 'r+', alpha=0.2)
           plt.plot([x[1]]*30, matches_after[:,feature_num], 'r+', alpha=0.2)
-          #plt.plot(x,[avg_match_before,avg_match_after],'r--',label='Average Match')
+          plt.plot(x,[avg_match_before,avg_match_after],'r--',label='Average Match')
           plt.fill_between(x, ci_down, ci_up, color='c', alpha=0.3)
           plt.fill_between(x, ci_down_2, ci_up_2, color='c', alpha=0.2)
           plt.plot([x[1],x[1]], [target_after[feature_num], target_expected[feature_num]], 'k--', label='Intervention Effect')
@@ -353,13 +376,7 @@ with connection:
 
           # Format plot
           plt.gcf().autofmt_xdate()
-          ax.set_xticks([
-            # TODO weeks start on Mondays and end on Sundays, calculate these dates
-            datetime.datetime(2020, 2, 10),  # begin before
-            datetime.datetime(2020, 3, 1),   # end before
-            datetime.datetime(2020, 3, 16),  # begin after
-            datetime.datetime(2020, 4, 5),   # end after
-          ])
+          ax.set_xticks(xticks)
           plt.xlabel("Time".format(dates_before,dates_after))
           plt.ylabel(str(topic_map[str(feature_num)][:4]) + " Usage")
           plt.legend()
