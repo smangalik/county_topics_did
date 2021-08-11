@@ -1,20 +1,27 @@
 # run as `python3 process_ctlb.py`
 
 from pymysql import cursors, connect
+
 import warnings
 import numpy as np
 import sys
 from tqdm import tqdm
+from sklearn.pipeline import make_pipeline
 from sklearn.neighbors import NearestNeighbors
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
 from scipy import stats
 import json
 import os.path
 import matplotlib.pyplot as plt
-import datetime
+import datetime, time
 
 # Ignore warnings
 warnings.catch_warnings()
 warnings.simplefilter("ignore")
+
+# Number of principal componenets used in PCA
+pca_components = 5
 
 # How many of the top populous counties we want to keep
 top_county_count = 300
@@ -31,13 +38,18 @@ county_factors_fields += ",log_pop_density10, percent_black10,percent_white10, f
 k_neighbors = 30
 
 # Diff in Diff Windows
-default_before_start_window = 2 # additional days to consider before event start
-default_after_end_window = 2 # additional days to consider after event end
+default_before_start_window = 1 # additional weeks to consider before event start
+default_after_end_window = 1 # additional weeks to consider after event end
+default_event_buffer = 1 # number of weeks to ignore before and after event
+
+# Confidence Interval Multiplier
+ci_window = 1.96
 
 # TODO populate without hardcoding
-# event_date_dict[county] = [event_start (datetime, exclusive), event_end (datetime, inclusive)]
+# event_date_dict[county] = [event_start (datetime, exclusive), event_end (datetime, inclusive), event_name]
 county_events = {}
-county_events['11001'] = [datetime.datetime(2020, 5, 25), datetime.datetime(2020, 6, 21)]
+county_events['11000'] = [datetime.datetime(2020, 5, 25), datetime.datetime(2020, 6, 21), "Death of George Floyd"]
+county_events['11001'] = [datetime.datetime(2020, 5, 25), None, "Death of George Floyd"]
 
 print('Connecting to MySQL...')
 
@@ -78,7 +90,7 @@ def get_county_factors(cursor, base_year, relevant_counties, normalize=False):
       cursor.execute(sql)
       result = cursor.fetchone()
       factors = np.asarray(result,dtype=np.float32)
-      county_factors[i][2:] = factors
+      county_factors[i][2:] = factors     
 
   non_nan_counties = ~np.isnan(county_factors).any(axis=1)
   print("\nDropping counties with NaNs:",np.asarray(relevant_counties)[~non_nan_counties])
@@ -88,6 +100,12 @@ def get_county_factors(cursor, base_year, relevant_counties, normalize=False):
   # Normalize columns of county_factors via z-score
   if normalize:
       county_factors = stats.zscore(county_factors, axis=0)
+
+  # Take the PCA of the county factors to calculate neighbors
+  pca = make_pipeline(StandardScaler(), 
+                      PCA(n_components=pca_components, random_state=0))
+  pca.fit(county_factors)
+  county_factors = pca.transform(county_factors)  
 
   # Fit the nearest neighbors
   neighbors = NearestNeighbors(n_neighbors=k_neighbors)
@@ -111,7 +129,7 @@ def get_county_topics(cursor, table_years, relevant_counties):
   for table_year in table_years:
     print('Processing {}'.format(table_year))
 
-    sql = "select * from ctlb.feat$cat_met_a30_2000_cp_w$timelines{}$yw_cnty$1gra;".format(table_year)
+    sql = "select * from ctlb2.feat$cat_met_a30_2000_cp_w$timelines{}$yw_cnty$1gra;".format(table_year)
     cursor.execute(sql)
 
     for result in tqdm(cursor.fetchall_unbuffered()): # Read _unbuffered() to save memory
@@ -162,16 +180,28 @@ def avg_topic_from_dates(county,dates):
 
   return np.mean(topic_usages, axis=0)
 
-def topic_usage_before_and_after(county, event_start, event_end=None, before_start_window=default_before_start_window, after_start_window=default_after_end_window):
+def topic_usage_before_and_after(county, event_start, event_end=None, 
+                                 before_start_window=default_before_start_window, 
+                                 after_start_window=default_after_end_window,
+                                 event_buffer=default_event_buffer):
 
-  # Parse start and end of event
+  # If no event end specified, end = start
   if event_end == None:
-    event_end = event_start
+    event_end = event_start 
+
+  #print('center',date_to_yearweek(event_start))
+
+  # Apply buffer
+  event_start = event_start - datetime.timedelta(days=event_buffer*7)
+  event_end = event_end + datetime.timedelta(days=event_buffer*7)
+
+  #print('start',date_to_yearweek(event_start))
+  #print('end',date_to_yearweek(event_end))
 
   # Before window dates, ex. '2020_11',2 -> ['2020_08', '2020_09', '2020_10']
   before_dates = []
   for i in range(1,before_start_window + 2):
-    day = event_start - datetime.timedelta(weeks=i)
+    day = event_start - datetime.timedelta(days=i*7)
     before_dates.append(day)
   before_dates = [date_to_yearweek(x) for x in before_dates]
   before_dates = list(set(before_dates))
@@ -181,7 +211,7 @@ def topic_usage_before_and_after(county, event_start, event_end=None, before_sta
   # After window dates, ex. '2020_11',2 -> ['2020_11', '2020_12', '2020_13']
   after_dates = []
   for i in range(after_start_window + 1):
-    day = event_end + datetime.timedelta(weeks=i)
+    day = event_end + datetime.timedelta(days=i*7)
     after_dates.append(day)
   after_dates = [date_to_yearweek(x) for x in after_dates]
   after_dates = list(set(after_dates))
@@ -229,11 +259,13 @@ with connection:
 
     if not os.path.isfile(county_topics_json):
         #table_years = list(range(2012, 2017))
-        table_years = [2020] # TODO add 2019
+        table_years = [2019,2020]
         county_topics = get_county_topics(cursor,table_years,populous_counties)
         with open(county_topics_json,"w") as json_file: json.dump(county_topics,json_file)
+    start_time = time.time()
     print("Importing produced county topics")
     with open(county_topics_json) as json_file: county_topics = json.load(json_file)
+    print("--- %s seconds to import ---" % (time.time() - start_time))
 
     print("county_topics['48117']['2020_19'] =",county_topics['48117']['2020_19'][:4],"...")
     print("county_topics['11001']['2020_19'] =",county_topics['11001']['2020_19'][:4],"...")
@@ -265,7 +297,7 @@ with connection:
             county_representation[ith_closest_county] += 1
 
             # TODO filter out counties with county events close by in time
-            ith_closest_county_event, _ = county_events.get(ith_closest_county,[None,None])
+            ith_closest_county_event, _, _ = county_events.get(ith_closest_county,[None,None, None])
             # if abs(ith_closest_county_event - target_event) < event_timing_buffer: continue
 
             matched_counties[target].append(ith_closest_county)
@@ -278,7 +310,7 @@ with connection:
     matched_diffs = {}
     matched_befores = {}
     for target in populous_counties:
-        target_event_start, target_event_end = county_events.get(target,[None,None])
+        target_event_start, target_event_end, event_name = county_events.get(target,[None,None,None])
 
         if target_event_start is None and target_event_end is None:
           continue
@@ -348,9 +380,8 @@ with connection:
           stderr_match_before = std_match_before / np.sqrt(k_neighbors)
           stderr_match_after = std_match_after / np.sqrt(k_neighbors)
 
-          is_significant = abs(intervention_effects[feature_num]) > stderr_match_after*1.96
-          if not is_significant:
-            continue
+          is_significant = abs(intervention_effects[feature_num]) > stderr_match_after*ci_window
+          if not is_significant: continue # only plot significant results
           increase_decrease = "increased" if intervention_effects[feature_num] > 0 else "decreased"
 
           print("Change in", topic_map[str(feature_num)][:8], increase_decrease, \
@@ -358,12 +389,12 @@ with connection:
 
           ci_down = [target_before[feature_num]-stderr_match_before, target_expected[feature_num]-stderr_match_after]
           ci_up = [target_before[feature_num]+stderr_match_before, target_expected[feature_num]+stderr_match_after]
-          ci_down_2 = [target_before[feature_num]-stderr_match_before*1.96, target_expected[feature_num]-stderr_match_after*1.96]
-          ci_up_2 = [target_before[feature_num]+stderr_match_before*1.96, target_expected[feature_num]+stderr_match_after*1.96]
+          ci_down_2 = [target_before[feature_num]-stderr_match_before*ci_window, target_expected[feature_num]-stderr_match_after*ci_window]
+          ci_up_2 = [target_before[feature_num]+stderr_match_before*ci_window, target_expected[feature_num]+stderr_match_after*ci_window]
 
           plt.clf() # reset plot
           fig, ax = plt.subplots()
-          fig.set_size_inches(5, 6)
+          fig.set_size_inches(6, 6)
           plt.plot(x, [target_before[feature_num], target_after[feature_num]], 'b-', label='Target (Actual)')
           plt.plot(x, [target_before[feature_num], target_expected[feature_num]],'c--', label='Target (Expected)')
           plt.plot([x[0]]*30, matches_before[:,feature_num], 'r+', alpha=0.2)
@@ -372,7 +403,7 @@ with connection:
           plt.fill_between(x, ci_down, ci_up, color='c', alpha=0.3)
           plt.fill_between(x, ci_down_2, ci_up_2, color='c', alpha=0.2)
           plt.plot([x[1],x[1]], [target_after[feature_num], target_expected[feature_num]], 'k--', label='Intervention Effect')
-          plt.title("Diff in Diff Analysis for County " + str(target))
+          plt.title("County " + str(target) + " before/after " + event_name)
 
           # Format plot
           plt.gcf().autofmt_xdate()
@@ -392,7 +423,5 @@ with connection:
         # TODO remove when done testing
         print("Closing early\n")
         sys.exit(0)
-
-    # TODO Correlate these changes with life satisfaction or other metric
 
     pass
