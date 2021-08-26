@@ -45,11 +45,23 @@ default_event_buffer = 1 # number of weeks to ignore before and after event
 # Confidence Interval Multiplier
 ci_window = 1.96
 
-# TODO populate without hardcoding
 # event_date_dict[county] = [event_start (datetime, exclusive), event_end (datetime, inclusive), event_name]
 county_events = {}
 county_events['11000'] = [datetime.datetime(2020, 5, 25), datetime.datetime(2020, 6, 21), "Death of George Floyd"]
 county_events['11001'] = [datetime.datetime(2020, 5, 25), None, "Death of George Floyd"]
+
+# populate events from countyFirsts.csv
+first_covid_case = {}
+first_covid_death = {}
+fips_to_name = {}
+with open("/data/smangalik/countyFirsts.csv") as countyFirsts:
+    lines = countyFirsts.read().splitlines()[1:] # read and skip header
+    for line in lines:
+      fips, county, state, population, firstCase, firstDeath = line.split(",")
+      fips_to_name[fips] = county + ", " + state
+      first_covid_case[fips] = datetime.datetime.strptime(firstCase, '%Y-%m-%d')
+      if firstDeath != "":
+        first_covid_death[fips] = datetime.datetime.strptime(firstDeath, '%Y-%m-%d')
 
 print('Connecting to MySQL...')
 
@@ -370,7 +382,7 @@ with connection:
         xticks = [begin_before, end_before, begin_after, end_after]
 
         # Plot findings
-        for feature_num in range(10): # TODO run on ALL topics
+        for feature_num in range(10): # TODO run on ALL topics -> Generalize findings
           matches_before = np.array(matched_befores[target])
           matches_after = np.array(matched_befores[target]) + np.array(matched_diffs[target])
           avg_match_before = np.mean(matches_before[:,feature_num])
@@ -402,12 +414,19 @@ with connection:
           plt.plot(x,[avg_match_before,avg_match_after],'r--',label='Average Match')
           plt.fill_between(x, ci_down, ci_up, color='c', alpha=0.3)
           plt.fill_between(x, ci_down_2, ci_up_2, color='c', alpha=0.2)
-          plt.plot([x[1],x[1]], [target_after[feature_num], target_expected[feature_num]], 'k--', label='Intervention Effect')
+          plt.plot([x[1],x[1]], [target_after[feature_num], target_expected[feature_num]], 'k--', \
+            label='Intervention Effect ({})'.format(round(intervention_effects[feature_num],5)))
           plt.title("County " + str(target) + " before/after " + event_name)
 
           # Format plot
           plt.gcf().autofmt_xdate()
           ax.set_xticks(xticks)
+          ax.set_xticklabels([
+            "{} weeks before event".format(default_event_buffer + default_before_start_window + 1),
+            "{} week before event".format(default_event_buffer),
+            "{} week after event".format(default_event_buffer),
+            "{} weeks after event".format(default_event_buffer + default_after_end_window + 1)
+          ])
           plt.xlabel("Time".format(dates_before,dates_after))
           plt.ylabel(str(topic_map[str(feature_num)][:4]) + " Usage")
           plt.legend()
