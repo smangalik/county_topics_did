@@ -26,8 +26,9 @@ pca_components = 5
 # How many of the top populous counties we want to keep
 top_county_count = 300
 
-# Number of topics studied
-num_topics = 2000
+# TODO allow arbitrary lexicons
+# Number of features studied
+num_feats = 2000
 
 # The county factors we want to cluster counties on
 county_stats = "num_users,num_tweets"
@@ -54,14 +55,16 @@ county_events['11001'] = [datetime.datetime(2020, 5, 25), None, "Death of George
 first_covid_case = {}
 first_covid_death = {}
 fips_to_name = {}
+fips_to_population = {}
 with open("/data/smangalik/countyFirsts.csv") as countyFirsts:
     lines = countyFirsts.read().splitlines()[1:] # read and skip header
     for line in lines:
       fips, county, state, population, firstCase, firstDeath = line.split(",")
       fips_to_name[fips] = county + ", " + state
-      first_covid_case[fips] = datetime.datetime.strptime(firstCase, '%Y-%m-%d')
+      fips_to_population[fips] = int(population)
+      first_covid_case[fips] = [datetime.datetime.strptime(firstCase, '%Y-%m-%d'),None,"First Covid Case"]
       if firstDeath != "":
-        first_covid_death[fips] = datetime.datetime.strptime(firstDeath, '%Y-%m-%d')
+        first_covid_death[fips] = [datetime.datetime.strptime(firstDeath, '%Y-%m-%d'),None,"First Covid Death"]
 
 print('Connecting to MySQL...')
 
@@ -157,7 +160,7 @@ def get_county_topics(cursor, table_years, relevant_counties):
       if county_topics.get(county) is None:
         county_topics[county] = {}
       if county_topics[county].get(yearweek) is None:
-        county_topics[county][yearweek] = [0] * num_topics
+        county_topics[county][yearweek] = [0] * num_feats
       county_topics[county][yearweek][feat] = value_norm
 
   return county_topics
@@ -182,12 +185,12 @@ def avg_topic_from_dates(county,dates):
   topic_usages = []
 
   for date in dates:
-    if county_topics.get(county).get(date):
+    if county_topics.get(county) is not None and county_topics.get(county).get(date) is not None:
       topics_for_date = np.array(county_topics[county][date])
       topic_usages.append(topics_for_date)
 
   if len(topic_usages) == 0:
-    print("No matching dates for", county, "on dates", dates)
+    # print("No matching dates for", county, "on dates", dates)
     return None
 
   return np.mean(topic_usages, axis=0)
@@ -233,6 +236,48 @@ def topic_usage_before_and_after(county, event_start, event_end=None,
   # Get average usage
   return avg_topic_from_dates(county, before_dates), avg_topic_from_dates(county, after_dates), before_dates, after_dates
 
+def plot_diff_in_diff_per_county():
+
+  plt.clf() # reset plot
+
+  # Confidence Intervals
+  ci_down = [target_before[feature_num]-stderr_match_before, target_expected[feature_num]-stderr_match_after]
+  ci_up = [target_before[feature_num]+stderr_match_before, target_expected[feature_num]+stderr_match_after]
+  ci_down_2 = [target_before[feature_num]-stderr_match_before*ci_window, target_expected[feature_num]-stderr_match_after*ci_window]
+  ci_up_2 = [target_before[feature_num]+stderr_match_before*ci_window, target_expected[feature_num]+stderr_match_after*ci_window]
+  
+  # Create Plot
+  fig, ax = plt.subplots()
+  fig.set_size_inches(6, 6)
+  plt.plot(x, [target_before[feature_num], target_after[feature_num]], 'b-', label='Target (Actual)')
+  plt.plot(x, [target_before[feature_num], target_expected[feature_num]],'c--', label='Target (Expected)')
+  plt.plot([x[0]]*30, matches_before[:,feature_num], 'r+', alpha=0.2)
+  plt.plot([x[1]]*30, matches_after[:,feature_num], 'r+', alpha=0.2)
+  plt.plot(x,[avg_match_before,avg_match_after],'r--',label='Average Match')
+  plt.fill_between(x, ci_down, ci_up, color='c', alpha=0.3)
+  plt.fill_between(x, ci_down_2, ci_up_2, color='c', alpha=0.2)
+  plt.plot([x[1],x[1]], [target_after[feature_num], target_expected[feature_num]], 'k--', \
+    label='Intervention Effect ({})'.format(round(intervention_effects[feature_num],5)))
+  plt.title("County " + str(target) + " before/after " + event_name)
+
+  # Format plot
+  plt.gcf().autofmt_xdate()
+  ax.set_xticks(xticks)
+  ax.set_xticklabels([
+    "{} weeks before event".format(default_event_buffer + default_before_start_window + 1),
+    "{} week before event".format(default_event_buffer),
+    "{} week after event".format(default_event_buffer),
+    "{} weeks after event".format(default_event_buffer + default_after_end_window + 1)
+  ])
+  plt.xlabel("Time".format(dates_before,dates_after))
+  plt.ylabel(str(topic_map[str(feature_num)][:4]) + " Usage")
+  plt.legend()
+  plt.tight_layout()
+
+  plt_name = "did_topic{}_cnty{}_time{}{}{}-{}{}{}.png".format( \
+    feature_num,target,x[0].year,x[0].month,x[0].day,x[1].year,x[0].month,x[0].day)
+
+  plt.savefig(plt_name)
 
 # Read in data with cursor
 with connection:
@@ -241,8 +286,11 @@ with connection:
 
     # Determine the relevant counties
     base_year = 2019
-    populous_counties = get_populous_counties(cursor, base_year)
-    print("\nCounties with the most users in {}".format(base_year),populous_counties[:25],"...")
+    #populous_counties = get_populous_counties(cursor, base_year)
+    #print("\nCounties with the most users in {}".format(base_year),populous_counties[:25],"...")
+    populous_counties = sorted(fips_to_population, key=fips_to_population.get, reverse=True)[:top_county_count]
+    print("\nCounties with the most users in 2021",populous_counties[:25],"...")
+    
 
     # Create county_factor matrix and n-neighbors mdoel
     # TODO use better 2020 data in general
@@ -296,151 +344,203 @@ with connection:
     matched_counties = {}
     for target in populous_counties:
 
-        # Get the k top neighbors
-        county_index = list(populous_counties).index(target)
-        n_neighbors = neighbors.kneighbors([county_factors[county_index]], k_neighbors + 1, return_distance=False)
-        matched_counties[target] = []
-        for i, n in enumerate(n_neighbors[0][1:]): # skip 0th entry (self)
-            ith_closest_county = populous_counties[n]
+      # Get the k top neighbors
+      county_index = list(populous_counties).index(target)
+      n_neighbors = neighbors.kneighbors([county_factors[county_index]], k_neighbors + 1, return_distance=False)
+      matched_counties[target] = []
+      for i, n in enumerate(n_neighbors[0][1:]): # skip 0th entry (self)
+          ith_closest_county = populous_counties[n]
 
-            # determine how much each county appears
-            if ith_closest_county not in county_representation.keys():
-              county_representation[ith_closest_county] = 0
-            county_representation[ith_closest_county] += 1
+          # determine how much each county appears
+          if ith_closest_county not in county_representation.keys():
+            county_representation[ith_closest_county] = 0
+          county_representation[ith_closest_county] += 1
 
-            # TODO filter out counties with county events close by in time
-            ith_closest_county_event, _, _ = county_events.get(ith_closest_county,[None,None, None])
-            # if abs(ith_closest_county_event - target_event) < event_timing_buffer: continue
+          # TODO filter out counties with county events close by in time
+          ith_closest_county_event, _, _ = first_covid_case.get(target,[None,None,None])
+          # if abs(ith_closest_county_event - target_event) < event_timing_buffer: continue
 
-            matched_counties[target].append(ith_closest_county)
+          matched_counties[target].append(ith_closest_county)
 
     neighbor_counts = sorted(county_representation.items(), key=lambda kv: kv[1])
-    print("\nCount of times _ is a neighbor\n", neighbor_counts[:10],"...",neighbor_counts[-10:], '\n')
+    print("\nCount of times each county is a neighbor\n", neighbor_counts[:10],"...",neighbor_counts[-10:], '\n')
 
-    # Calculate diff in diffs
+    # Calculate diff in diffs dict[county] = [feature_array]
+    target_befores = {}
     target_diffs = {}
-    matched_diffs = {}
     matched_befores = {}
+    matched_diffs = {}
+    avg_matched_befores = {}
+    avg_matched_diffs = {}
     for target in populous_counties:
-        target_event_start, target_event_end, event_name = county_events.get(target,[None,None,None])
 
-        if target_event_start is None and target_event_end is None:
-          continue
+      # George Flyod's Death
+      #target_event_start, target_event_end, event_name = county_events.get(target,[None,None,None])
+      # First Covid Death
+      #target_event_start, target_event_end, event_name = first_covid_death.get(target,[None,None,None])
+      # First Case of Covid
+      target_event_start, target_event_end, event_name = first_covid_case.get(target,[None,None,None])
+      
 
-        target_before, target_after, dates_before, dates_after = topic_usage_before_and_after(target, event_start=target_event_start, event_end=target_event_end)
-        if target_before is None or target_after is None: continue
+      if target_event_start is None and target_event_end is None:
+        continue # no event was found for this county
 
-        #print('dates_before',dates_before)
-        #print('dates_after',dates_after)
+      target_before, target_after, dates_before, dates_after = topic_usage_before_and_after(target, event_start=target_event_start, event_end=target_event_end)
+      if target_before is None or target_after is None: 
+        continue # not enough data about this county
 
-        target_diff = np.subtract(target_after,target_before)
+      #print('dates_before',dates_before)
+      #print('dates_after',dates_after)
 
-        target_diffs[target] = target_diff
+      target_diff = np.subtract(target_after,target_before)
 
-        matched_counties_considered = matched_counties[target]
-        matched_diffs[target] = []
-        matched_befores[target] = []
-        for matched_county in matched_counties_considered:
-            matched_before, matched_after, _, _ = topic_usage_before_and_after(matched_county, event_start=target_event_start, event_end=target_event_end)
-            if matched_before is None or matched_after is None: continue
-            matched_diff = np.subtract(matched_after,matched_before)
+      target_befores[target] = target_before
+      target_diffs[target] = target_diff
 
-            # Add all differences, then divide by num of considered counties
-            matched_diffs[target].append(matched_diff)
-            matched_befores[target].append(matched_before)
+      matched_counties_considered = matched_counties[target]
+      matched_diffs[target] = []
+      matched_befores[target] = []
+      for matched_county in matched_counties_considered:
+          matched_before, matched_after, _, _ = topic_usage_before_and_after(matched_county, event_start=target_event_start, event_end=target_event_end)
+          if matched_before is None or matched_after is None: continue
+          matched_diff = np.subtract(matched_after,matched_before)
 
-        # print('target_diffs',target_diffs)
-        # print('matched_diffs',matched_diffs)
+          # Add all differences, then divide by num of considered counties
+          matched_diffs[target].append(matched_diff)
+          matched_befores[target].append(matched_before)
+          avg_matched_befores[target] = np.mean(matched_befores[target], axis=0)
 
-        # Average/std change from all matched counties
-        avg_matched_diff = np.mean(matched_diffs[target], axis=0)
-        std_matched_diff = np.std(matched_diffs[target], axis=0)
-        # print("\nAverage change in matched counties:", avg_matched_diff)
-        # print("std. dev. change in matched counties:", avg_matched_diff)
+      # print('target_diffs',target_diffs)
+      # print('matched_diffs',matched_diffs)
 
-        # Diff in Diff
-        target_expected = target_before + avg_matched_diff
-        intervention_effects = target_after - target_expected
+      # Average/std change from all matched counties
+      avg_matched_diff = np.mean(matched_diffs[target], axis=0)
+      std_matched_diff = np.std(matched_diffs[target], axis=0)
+      avg_matched_diffs[target] = avg_matched_diff
+      
 
-        # compare changes in avg_matched_counties with the changes in the target_county
-        # print()
-        # print("Target Before:\n", target_before)
-        # print("Target After (with intervention / observation)\n", target_after)
-        # print("Target After (without intervention / expected):\n", target_expected)
-        # print("Intervention Effect:\n", intervention_effects)]
+      # print("\nAverage change in matched counties:", avg_matched_diff)
+      # print("std. dev. change in matched counties:", avg_matched_diff)
 
-        # Relevant Dates
-        begin_before, _ = yearweek_to_dates(min(dates_before))
-        _, end_before = yearweek_to_dates(max(dates_before))
-        begin_after, _ = yearweek_to_dates(min(dates_after))
-        _, end_after = yearweek_to_dates(max(dates_after))
-        middle_before = begin_before + (end_before - begin_before)/2
-        middle_after = begin_after + (end_after - begin_after)/2
+      # Diff in Diff
+      target_expected = target_before + avg_matched_diff
+      intervention_effects = target_after - target_expected
 
-        # Calculate in-between dates and xticks
-        x = [middle_before, middle_after]
-        xticks = [begin_before, end_before, begin_after, end_after]
+      # compare changes in avg_matched_counties with the changes in the target_county
+      # print()
+      # print("Target Before:\n", target_before)
+      # print("Target After (with intervention / observation)\n", target_after)
+      # print("Target After (without intervention / expected):\n", target_expected)
+      # print("Intervention Effect:\n", intervention_effects)]
 
-        # Plot findings
-        for feature_num in range(10): # TODO run on ALL topics -> Generalize findings
-          matches_before = np.array(matched_befores[target])
-          matches_after = np.array(matched_befores[target]) + np.array(matched_diffs[target])
-          avg_match_before = np.mean(matches_before[:,feature_num])
-          avg_match_after = np.mean(matches_after[:,feature_num])
-          std_match_before = np.std(matches_before[:,feature_num])
-          std_match_after = np.std(matches_after[:,feature_num])
-          stderr_match_before = std_match_before / np.sqrt(k_neighbors)
-          stderr_match_after = std_match_after / np.sqrt(k_neighbors)
+      # Relevant Dates
+      begin_before, _ = yearweek_to_dates(min(dates_before))
+      _, end_before = yearweek_to_dates(max(dates_before))
+      begin_after, _ = yearweek_to_dates(min(dates_after))
+      _, end_after = yearweek_to_dates(max(dates_after))
+      middle_before = begin_before + (end_before - begin_before)/2
+      middle_after = begin_after + (end_after - begin_after)/2
 
-          is_significant = abs(intervention_effects[feature_num]) > stderr_match_after*ci_window
-          if not is_significant: continue # only plot significant results
-          increase_decrease = "increased" if intervention_effects[feature_num] > 0 else "decreased"
+      # Calculate in-between dates and xticks
+      x = [middle_before, middle_after]
+      xticks = [begin_before, end_before, begin_after, end_after]
 
-          print("Change in", topic_map[str(feature_num)][:8], increase_decrease, \
-            "significantly -> Topic #", feature_num)
+      # Plot findings
+      list_features = range(num_feats)
+      for feature_num in list_features:
+        matches_before = np.array(matched_befores[target])
+        matches_after = np.array(matched_befores[target]) + np.array(matched_diffs[target])
+        avg_match_before = np.mean(matches_before[:,feature_num])
+        avg_match_after = np.mean(matches_after[:,feature_num])
+        std_match_before = np.std(matches_before[:,feature_num])
+        std_match_after = np.std(matches_after[:,feature_num])
+        stderr_match_before = std_match_before / np.sqrt(k_neighbors)
+        stderr_match_after = std_match_after / np.sqrt(k_neighbors)
 
-          ci_down = [target_before[feature_num]-stderr_match_before, target_expected[feature_num]-stderr_match_after]
-          ci_up = [target_before[feature_num]+stderr_match_before, target_expected[feature_num]+stderr_match_after]
-          ci_down_2 = [target_before[feature_num]-stderr_match_before*ci_window, target_expected[feature_num]-stderr_match_after*ci_window]
-          ci_up_2 = [target_before[feature_num]+stderr_match_before*ci_window, target_expected[feature_num]+stderr_match_after*ci_window]
+        is_significant = abs(intervention_effects[feature_num]) > stderr_match_after*ci_window
+        if not is_significant: 
+          continue # only plot significant results
 
-          plt.clf() # reset plot
-          fig, ax = plt.subplots()
-          fig.set_size_inches(6, 6)
-          plt.plot(x, [target_before[feature_num], target_after[feature_num]], 'b-', label='Target (Actual)')
-          plt.plot(x, [target_before[feature_num], target_expected[feature_num]],'c--', label='Target (Expected)')
-          plt.plot([x[0]]*30, matches_before[:,feature_num], 'r+', alpha=0.2)
-          plt.plot([x[1]]*30, matches_after[:,feature_num], 'r+', alpha=0.2)
-          plt.plot(x,[avg_match_before,avg_match_after],'r--',label='Average Match')
-          plt.fill_between(x, ci_down, ci_up, color='c', alpha=0.3)
-          plt.fill_between(x, ci_down_2, ci_up_2, color='c', alpha=0.2)
-          plt.plot([x[1],x[1]], [target_after[feature_num], target_expected[feature_num]], 'k--', \
-            label='Intervention Effect ({})'.format(round(intervention_effects[feature_num],5)))
-          plt.title("County " + str(target) + " before/after " + event_name)
+        # List significant changes
+        #increase_decrease = "increased" if intervention_effects[feature_num] > 0 else "decreased"
+        #print("Change in", topic_map[str(feature_num)][:8], increase_decrease, "significantly -> Topic #", feature_num)
 
-          # Format plot
-          plt.gcf().autofmt_xdate()
-          ax.set_xticks(xticks)
-          ax.set_xticklabels([
-            "{} weeks before event".format(default_event_buffer + default_before_start_window + 1),
-            "{} week before event".format(default_event_buffer),
-            "{} week after event".format(default_event_buffer),
-            "{} weeks after event".format(default_event_buffer + default_after_end_window + 1)
-          ])
-          plt.xlabel("Time".format(dates_before,dates_after))
-          plt.ylabel(str(topic_map[str(feature_num)][:4]) + " Usage")
-          plt.legend()
-          plt.tight_layout()
+        # Generate plots for each diff in diff change
+        #plot_diff_in_diff_per_county()
 
-          plt_name = "did_topic{}_cnty{}_time{}{}{}-{}{}{}.png".format( \
-            feature_num,target,x[0].year,x[0].month,x[0].day,x[1].year,x[0].month,x[0].day)
+    # Aggregated diff in diff
+    all_target_befores = np.stack(target_befores.values(), axis=0)
+    all_target_diffs = np.stack(target_diffs.values(), axis=0)
+    all_target_afters = all_target_befores + all_target_diffs
+    all_avg_matched_befores = np.stack(avg_matched_befores.values(), axis=0)
+    all_avg_matched_diffs = np.stack(avg_matched_diffs.values(), axis=0)
+    all_avg_matched_afters = all_avg_matched_befores + all_avg_matched_diffs
+    print("all_target_befores",all_target_befores.shape)
+    print("all_target_diffs",all_target_diffs.shape)
+    print("all_matched_befores",all_avg_matched_befores.shape)
+    print("all_avg_matched_diffs",all_avg_matched_diffs.shape)
 
-          plt.savefig(plt_name)
+    # Plot aggregated findings for each feature
+    for feature_num in range(num_feats): # run against all topics
+      plt.clf() # reset plot
 
-        # plt.show()
+      target_before = np.mean(all_target_befores[:,feature_num]) # average of all targets before [scalar]
+      target_diff = np.mean(all_target_diffs[:,feature_num]) # average of all target diffs [scalar]
+      target_after = target_before + target_diff  # average of all target afters [scalar]
 
-        # TODO remove when done testing
-        print("Closing early\n")
-        sys.exit(0)
+      avg_match_before = np.mean(all_avg_matched_befores[:,feature_num])
+      avg_match_diff = np.mean(all_avg_matched_diffs[:,feature_num])
+      avg_match_after = avg_match_before + avg_match_diff
 
-    pass
+      target_expected = target_before + avg_match_diff  # average of all targets_before + avg_matched_diff [scalar]
+      intervention_effect = target_after - target_expected
+      
+      std_match_before = np.std(all_avg_matched_befores[:,feature_num])
+      std_match_after = np.std(matches_after[:,feature_num])
+      stderr_match_before = std_match_before / np.sqrt(k_neighbors)
+      stderr_match_after = std_match_after / np.sqrt(k_neighbors)
+
+      is_significant = abs(intervention_effect) > stderr_match_after*ci_window
+      if not is_significant: 
+        continue # only plot significant results
+      increase_decrease = "increased" if intervention_effects[feature_num] > 0 else "decreased"
+      print("Change in", topic_map[str(feature_num)][:8], increase_decrease, "significantly -> Topic #", feature_num)
+
+      # Confidence Intervals
+      ci_down = [target_before-stderr_match_before, target_expected-stderr_match_after]
+      ci_up = [target_before+stderr_match_before, target_expected+stderr_match_after]
+      ci_down_2 = [target_before-stderr_match_before*ci_window, target_expected-stderr_match_after*ci_window]
+      ci_up_2 = [target_before+stderr_match_before*ci_window, target_expected+stderr_match_after*ci_window]
+      
+      # Create Plot
+      x = [2, 6]
+      xticks = [1, 3, 5, 7]
+      fig, ax = plt.subplots()
+      fig.set_size_inches(6, 6)
+      plt.plot(x, [target_before, target_after], 'b-', label='Target (Actual)')
+      plt.plot(x, [target_before, target_expected],'c--', label='Target (Expected)')
+      #plt.plot([x[0]]*30, matches_before[:,feature_num], 'r+', alpha=0.2)
+      #plt.plot([x[1]]*30, matches_after[:,feature_num], 'r+', alpha=0.2)
+      plt.plot(x,[avg_match_before,avg_match_after],'r--',label='Average Match')
+      plt.fill_between(x, ci_down, ci_up, color='c', alpha=0.3)
+      plt.fill_between(x, ci_down_2, ci_up_2, color='c', alpha=0.2)
+      plt.plot([x[1],x[1]], [target_after, target_expected], 'k--', \
+        label='Intervention Effect ({})'.format(round(intervention_effect,5)))
+      plt.title("All counties Before/After " + event_name)
+
+      # Format plot
+      plt.xticks(rotation=45, ha='right')
+      ax.set_xticks(xticks)
+      ax.set_xticklabels([
+        "{} weeks before event".format(default_event_buffer + default_before_start_window + 1),
+        "{} week before event".format(default_event_buffer),
+        "{} week after event".format(default_event_buffer),
+        "{} weeks after event".format(default_event_buffer + default_after_end_window + 1)
+      ])
+      plt.xlabel("Time".format(dates_before,dates_after))
+      plt.ylabel(str(topic_map[str(feature_num)][:4]) + " Usage")
+      plt.legend()
+      plt.tight_layout()
+
+      # plt.show()
+      # TODO save plots
