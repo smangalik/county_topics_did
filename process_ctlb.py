@@ -20,6 +20,9 @@ import datetime, time
 warnings.catch_warnings()
 warnings.simplefilter("ignore")
 
+# is the analysis being done on topics? (need to be interpreted)
+topics = True
+
 # Number of principal componenets used in PCA
 pca_components = 5
 
@@ -139,7 +142,7 @@ def get_topic_map(cursor):
   return topic_map
 
 # Iterate over all time units to create county_topics[county][year_week] = topics
-def get_county_topics(cursor, table_years, relevant_counties):
+def get_county_topics(cursor, table_years):
   county_topics = {}
   for table_year in table_years:
     print('Processing {}'.format(table_year))
@@ -270,7 +273,10 @@ def plot_diff_in_diff_per_county():
     "{} weeks after event".format(default_event_buffer + default_after_end_window + 1)
   ])
   plt.xlabel("Time".format(dates_before,dates_after))
-  plt.ylabel(str(topic_map[str(feature_num)][:4]) + " Usage")
+  if topics:
+    plt.ylabel(str(topic_map[str(feature_num)][:4]) + " Usage")
+  else: 
+    plt.ylabel(str(feature_num) + " Usage")
   plt.legend()
   plt.tight_layout()
 
@@ -307,12 +313,13 @@ with connection:
         print('#{}'.format(i),'Nearest County is',populous_counties[n],'with distance',dist[0][i])
 
     # Map topics to their key words
-    topic_map = get_topic_map(cursor)
-    print()
-    print('Topic 0    =',topic_map['0'])
-    print('Topic 344  =',topic_map['344'])
-    print('Topic 160  =',topic_map['160'])
-    print('Topic 1999 =',topic_map['1999'],'\n')
+    if topics:
+      topic_map = get_topic_map(cursor)
+      print()
+      print('Topic 0    =',topic_map['0'])
+      print('Topic 344  =',topic_map['344'])
+      print('Topic 160  =',topic_map['160'])
+      print('Topic 1999 =',topic_map['1999'],'\n')
 
     # Get county topic information
     county_topics_json = "/data/smangalik/county_topics_ctlb.json"
@@ -504,7 +511,10 @@ with connection:
       if not is_significant: 
         continue # only plot significant results
       increase_decrease = "increased" if intervention_effects[feature_num] > 0 else "decreased"
-      print("Change in", topic_map[str(feature_num)][:8], increase_decrease, "significantly -> Topic #", feature_num)
+      if topics:
+        print("Change in", topic_map[str(feature_num)][:8], increase_decrease, "significantly -> Topic #", feature_num)
+      else:
+        print("Change in", str(feature_num), increase_decrease, "significantly -> Topic #", feature_num)
 
       # Confidence Intervals
       ci_down = [target_before-stderr_match_before, target_expected-stderr_match_after]
@@ -538,7 +548,10 @@ with connection:
         "{} weeks after event".format(default_event_buffer + default_after_end_window + 1)
       ])
       plt.xlabel("Time".format(dates_before,dates_after))
-      plt.ylabel(str(topic_map[str(feature_num)][:4]) + " Usage")
+      if topics:
+        plt.ylabel(str(topic_map[str(feature_num)][:4]) + " Usage")
+      else: 
+        plt.ylabel(str(feature_num) + " Usage")
       plt.legend()
       plt.tight_layout()
 
