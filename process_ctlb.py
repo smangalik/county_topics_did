@@ -20,6 +20,9 @@ import datetime, time
 warnings.catch_warnings()
 warnings.simplefilter("ignore")
 
+# Get county feat information
+county_feats_json = "/data/smangalik/county_topics_ctlb.json"
+
 # is the analysis being done on topics? (need to be interpreted)
 topics = True
 
@@ -141,9 +144,9 @@ def get_topic_map(cursor):
     topic_map[category] = terms.split(',')[:10]
   return topic_map
 
-# Iterate over all time units to create county_topics[county][year_week] = topics
-def get_county_topics(cursor, table_years):
-  county_topics = {}
+# Iterate over all time units to create county_feats[county][year_week] = feats
+def get_county_feats(cursor, table_years):
+  county_feats = {}
   for table_year in table_years:
     print('Processing {}'.format(table_year))
 
@@ -159,14 +162,14 @@ def get_county_topics(cursor, table_years):
       if county == "" or yearweek == "": continue
       county = str(county).zfill(5)
 
-      # Store county_topics
-      if county_topics.get(county) is None:
-        county_topics[county] = {}
-      if county_topics[county].get(yearweek) is None:
-        county_topics[county][yearweek] = [0] * num_feats
-      county_topics[county][yearweek][feat] = value_norm
+      # Store county_feats
+      if county_feats.get(county) is None:
+        county_feats[county] = {}
+      if county_feats[county].get(yearweek) is None:
+        county_feats[county][yearweek] = [0] * num_feats
+      county_feats[county][yearweek][feat] = value_norm
 
-  return county_topics
+  return county_feats
 
 # Returns the yearweek that the date is within
 def date_to_yearweek(d):
@@ -184,21 +187,21 @@ def yearweek_to_dates(yw):
   sunday = monday + datetime.timedelta(days=6)
   return monday, sunday
 
-def avg_topic_from_dates(county,dates):
-  topic_usages = []
+def avg_feat_usage_from_dates(county,dates):
+  feat_usages = []
 
   for date in dates:
-    if county_topics.get(county) is not None and county_topics.get(county).get(date) is not None:
-      topics_for_date = np.array(county_topics[county][date])
-      topic_usages.append(topics_for_date)
+    if county_feats.get(county) is not None and county_feats.get(county).get(date) is not None:
+      feats_for_date = np.array(county_feats[county][date])
+      feat_usages.append(feats_for_date)
 
-  if len(topic_usages) == 0:
+  if len(feat_usages) == 0:
     # print("No matching dates for", county, "on dates", dates)
     return None
 
-  return np.mean(topic_usages, axis=0)
+  return np.mean(feat_usages, axis=0)
 
-def topic_usage_before_and_after(county, event_start, event_end=None, 
+def feat_usage_before_and_after(county, event_start, event_end=None, 
                                  before_start_window=default_before_start_window, 
                                  after_start_window=default_after_end_window,
                                  event_buffer=default_event_buffer):
@@ -237,7 +240,7 @@ def topic_usage_before_and_after(county, event_start, event_end=None,
   #print('after',after_dates)
 
   # Get average usage
-  return avg_topic_from_dates(county, before_dates), avg_topic_from_dates(county, after_dates), before_dates, after_dates
+  return avg_feat_usage_from_dates(county, before_dates), avg_feat_usage_from_dates(county, after_dates), before_dates, after_dates
 
 def plot_diff_in_diff_per_county():
 
@@ -280,7 +283,7 @@ def plot_diff_in_diff_per_county():
   plt.legend()
   plt.tight_layout()
 
-  plt_name = "did_topic{}_cnty{}_time{}{}{}-{}{}{}.png".format( \
+  plt_name = "did_feat_{}_cnty{}_time{}{}{}-{}{}{}.png".format( \
     feature_num,target,x[0].year,x[0].month,x[0].day,x[1].year,x[0].month,x[0].day)
 
   plt.savefig(plt_name)
@@ -321,27 +324,25 @@ with connection:
       print('Topic 160  =',topic_map['160'])
       print('Topic 1999 =',topic_map['1999'],'\n')
 
-    # Get county topic information
-    county_topics_json = "/data/smangalik/county_topics_ctlb.json"
-
-    if not os.path.isfile(county_topics_json):
+    if not os.path.isfile(county_feats_json):
         #table_years = list(range(2012, 2017))
         table_years = [2019,2020]
-        county_topics = get_county_topics(cursor,table_years,populous_counties)
-        with open(county_topics_json,"w") as json_file: json.dump(county_topics,json_file)
+        county_feats = get_county_feats(cursor,table_years,populous_counties)
+        with open(county_feats_json,"w") as json_file: json.dump(county_feats,json_file)
     start_time = time.time()
-    print("Importing produced county topics")
-    with open(county_topics_json) as json_file: county_topics = json.load(json_file)
+    print("Importing produced county features")
+    with open(county_feats_json) as json_file: 
+      county_feats = json.load(json_file)
     print("--- %s seconds to import ---" % (time.time() - start_time))
 
-    print("county_topics['48117']['2020_19'] =",county_topics['48117']['2020_19'][:4],"...")
-    print("county_topics['11001']['2020_19'] =",county_topics['11001']['2020_19'][:4],"...")
-    print("county_topics['11001']['2020_20'] =",county_topics['11001']['2020_20'][:4],"...")
-    print("county_topics['11001']['2020_21'] =",county_topics['11001']['2020_21'][:4],"...")
-    print("county_topics['11001']['2020_25'] =",county_topics['11001']['2020_25'][:4],"...")
-    print("county_topics['11001']['2020_26'] =",county_topics['11001']['2020_26'][:4],"...")
-    print("county_topics['11001']['2020_27'] =",county_topics['11001']['2020_27'][:4],"...")
-    available_yws = list(county_topics['11001'].keys())
+    print("county_feats['48117']['2020_19'] =",county_feats['48117']['2020_19'][:4],"...")
+    print("county_feats['11001']['2020_19'] =",county_feats['11001']['2020_19'][:4],"...")
+    print("county_feats['11001']['2020_20'] =",county_feats['11001']['2020_20'][:4],"...")
+    print("county_feats['11001']['2020_21'] =",county_feats['11001']['2020_21'][:4],"...")
+    print("county_feats['11001']['2020_25'] =",county_feats['11001']['2020_25'][:4],"...")
+    print("county_feats['11001']['2020_26'] =",county_feats['11001']['2020_26'][:4],"...")
+    print("county_feats['11001']['2020_27'] =",county_feats['11001']['2020_27'][:4],"...")
+    available_yws = list(county_feats['11001'].keys())
     available_yws.sort()
     print("\nAvailable weeks for 11001:",  available_yws)
 
@@ -392,7 +393,7 @@ with connection:
       if target_event_start is None and target_event_end is None:
         continue # no event was found for this county
 
-      target_before, target_after, dates_before, dates_after = topic_usage_before_and_after(target, event_start=target_event_start, event_end=target_event_end)
+      target_before, target_after, dates_before, dates_after = feat_usage_before_and_after(target, event_start=target_event_start, event_end=target_event_end)
       if target_before is None or target_after is None: 
         continue # not enough data about this county
 
@@ -408,7 +409,7 @@ with connection:
       matched_diffs[target] = []
       matched_befores[target] = []
       for matched_county in matched_counties_considered:
-          matched_before, matched_after, _, _ = topic_usage_before_and_after(matched_county, event_start=target_event_start, event_end=target_event_end)
+          matched_before, matched_after, _, _ = feat_usage_before_and_after(matched_county, event_start=target_event_start, event_end=target_event_end)
           if matched_before is None or matched_after is None: continue
           matched_diff = np.subtract(matched_after,matched_before)
 
@@ -470,7 +471,8 @@ with connection:
 
         # List significant changes
         #increase_decrease = "increased" if intervention_effects[feature_num] > 0 else "decreased"
-        #print("Change in", topic_map[str(feature_num)][:8], increase_decrease, "significantly -> Topic #", feature_num)
+        #if topics:
+          #print("Change in", topic_map[str(feature_num)][:8], increase_decrease, "significantly -> Topic #", feature_num)
 
         # Generate plots for each diff in diff change
         #plot_diff_in_diff_per_county()
@@ -488,7 +490,7 @@ with connection:
     print("all_avg_matched_diffs",all_avg_matched_diffs.shape)
 
     # Plot aggregated findings for each feature
-    for feature_num in range(num_feats): # run against all topics
+    for feature_num in range(num_feats): # run against all features
       plt.clf() # reset plot
 
       target_before = np.mean(all_target_befores[:,feature_num]) # average of all targets before [scalar]
