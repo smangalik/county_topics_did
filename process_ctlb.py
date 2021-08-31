@@ -1,30 +1,42 @@
-# run as `python3 process_ctlb.py`
+""" 
+run as `python3 process_ctlb.py` or `python3 process_ctlb.py --not-topics` 
+"""
 
 from pymysql import cursors, connect
 
 import warnings
-import numpy as np
 import sys
+import argparse
 from tqdm import tqdm
+import json
+import os.path
+import datetime, time
+
+import numpy as np
+import matplotlib.pyplot as plt
+
 from sklearn.pipeline import make_pipeline
 from sklearn.neighbors import NearestNeighbors
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 from scipy import stats
-import json
-import os.path
-import matplotlib.pyplot as plt
-import datetime, time
+
 
 # Ignore warnings
 warnings.catch_warnings()
 warnings.simplefilter("ignore")
 
-# Get county feat information
-county_feats_json = "/data/smangalik/county_topics_ctlb.json"
+parser = argparse.ArgumentParser(description="Process feature table for diff in diff analysis")
+parser.add_argument('--not_topics', dest="topics", default=True ,action='store_false', help='Is the analysis done on topics?')
+args = parser.parse_args()
 
-# is the analysis being done on topics? (need to be interpreted)
-topics = True
+# is the analysis being done on topics? (topic_num needs to be interpreted)
+topics = args.topics
+
+# The county factors we want to cluster counties on
+county_stats = "num_users,num_tweets"
+county_factors_fields = "percent_male10, med_age10, log_med_house_income0509, high_school0509, bac0509"
+county_factors_fields += ",log_pop_density10, percent_black10,percent_white10, foreign_born0509, rep_pre_2012, married0509"
 
 # Number of principal componenets used in PCA
 pca_components = 5
@@ -36,11 +48,6 @@ top_county_count = 300
 # Number of features studied
 num_feats = 2000
 
-# The county factors we want to cluster counties on
-county_stats = "num_users,num_tweets"
-county_factors_fields = "percent_male10, med_age10, log_med_house_income0509, high_school0509, bac0509"
-county_factors_fields += ",log_pop_density10, percent_black10,percent_white10, foreign_born0509, rep_pre_2012, married0509"
-
 # Number of nearest neighbors
 k_neighbors = 30
 
@@ -51,6 +58,9 @@ default_event_buffer = 1 # number of weeks to ignore before and after event
 
 # Confidence Interval Multiplier
 ci_window = 1.96
+
+# Scale factor for y-axis
+scale_factor = 100000
 
 # event_date_dict[county] = [event_start (datetime, exclusive), event_end (datetime, inclusive), event_name]
 county_events = {}
@@ -150,14 +160,16 @@ def get_county_feats(cursor, table_years):
   for table_year in table_years:
     print('Processing {}'.format(table_year))
 
-    sql = "select * from ctlb2.feat$cat_met_a30_2000_cp_w$timelines{}$yw_cnty$1gra;".format(table_year)
+    if topics:
+      sql = "select * from ctlb2.feat$cat_met_a30_2000_cp_w$timelines{}$yw_cnty$1gra;".format(table_year)
+    else:
+      sql = "select * from ctlb2.feat$dd_depAnxLex$timelines{}$yw_cnty$1gra;".format(table_year)
     cursor.execute(sql)
 
     for result in tqdm(cursor.fetchall_unbuffered()): # Read _unbuffered() to save memory
       yw_county, feat, value, value_norm = result
 
       if feat == '_int': continue
-      feat = int(feat)
       yearweek, county = yw_county.split(":")
       if county == "" or yearweek == "": continue
       county = str(county).zfill(5)
@@ -166,7 +178,7 @@ def get_county_feats(cursor, table_years):
       if county_feats.get(county) is None:
         county_feats[county] = {}
       if county_feats[county].get(yearweek) is None:
-        county_feats[county][yearweek] = [0] * num_feats
+        county_feats[county][yearweek] = {}
       county_feats[county][yearweek][feat] = value_norm
 
   return county_feats
@@ -187,6 +199,24 @@ def yearweek_to_dates(yw):
   sunday = monday + datetime.timedelta(days=6)
   return monday, sunday
 
+def avg_topic_usage_from_dates(county,dates):
+  feat_usages = []
+
+  for date in dates:
+    if county_feats.get(county) is not None and county_feats.get(county).get(date) is not None:
+      feats_for_date = np.array(county_feats[county][date]) * scale_factor # scale values and store
+      feat_usages.append(feats_for_date)
+
+  if len(feat_usages) == 0:
+    # print("No matching dates for", county, "on dates", dates)
+    return None
+
+  #print("feats_for_date",feats_for_date)
+  #print("feat_usages",feat_usages)
+
+  return np.mean(feat_usages, axis=0)
+
+# TODO change to accomodate non-indexed feats; OR force all things to be indexed and have a map of values
 def avg_feat_usage_from_dates(county,dates):
   feat_usages = []
 
@@ -198,6 +228,9 @@ def avg_feat_usage_from_dates(county,dates):
   if len(feat_usages) == 0:
     # print("No matching dates for", county, "on dates", dates)
     return None
+
+  print("feats_for_date",feats_for_date)
+  print("feat_usages",feat_usages)
 
   return np.mean(feat_usages, axis=0)
 
@@ -240,58 +273,87 @@ def feat_usage_before_and_after(county, event_start, event_end=None,
   #print('after',after_dates)
 
   # Get average usage
-  return avg_feat_usage_from_dates(county, before_dates), avg_feat_usage_from_dates(county, after_dates), before_dates, after_dates
+  if topics:
+    return avg_topic_usage_from_dates(county, before_dates), avg_topic_usage_from_dates(county, after_dates), before_dates, after_dates
+  else:
+    return avg_feat_usage_from_dates(county, before_dates), avg_feat_usage_from_dates(county, after_dates), before_dates, after_dates
 
 def plot_diff_in_diff_per_county():
 
-  plt.clf() # reset plot
-
-  # Confidence Intervals
-  ci_down = [target_before[feature_num]-stderr_match_before, target_expected[feature_num]-stderr_match_after]
-  ci_up = [target_before[feature_num]+stderr_match_before, target_expected[feature_num]+stderr_match_after]
-  ci_down_2 = [target_before[feature_num]-stderr_match_before*ci_window, target_expected[feature_num]-stderr_match_after*ci_window]
-  ci_up_2 = [target_before[feature_num]+stderr_match_before*ci_window, target_expected[feature_num]+stderr_match_after*ci_window]
-  
-  # Create Plot
-  fig, ax = plt.subplots()
-  fig.set_size_inches(6, 6)
-  plt.plot(x, [target_before[feature_num], target_after[feature_num]], 'b-', label='Target (Actual)')
-  plt.plot(x, [target_before[feature_num], target_expected[feature_num]],'c--', label='Target (Expected)')
-  plt.plot([x[0]]*30, matches_before[:,feature_num], 'r+', alpha=0.2)
-  plt.plot([x[1]]*30, matches_after[:,feature_num], 'r+', alpha=0.2)
-  plt.plot(x,[avg_match_before,avg_match_after],'r--',label='Average Match')
-  plt.fill_between(x, ci_down, ci_up, color='c', alpha=0.3)
-  plt.fill_between(x, ci_down_2, ci_up_2, color='c', alpha=0.2)
-  plt.plot([x[1],x[1]], [target_after[feature_num], target_expected[feature_num]], 'k--', \
-    label='Intervention Effect ({})'.format(round(intervention_effects[feature_num],5)))
-  plt.title("County " + str(target) + " before/after " + event_name)
-
-  # Format plot
-  plt.gcf().autofmt_xdate()
-  ax.set_xticks(xticks)
-  ax.set_xticklabels([
-    "{} weeks before event".format(default_event_buffer + default_before_start_window + 1),
-    "{} week before event".format(default_event_buffer),
-    "{} week after event".format(default_event_buffer),
-    "{} weeks after event".format(default_event_buffer + default_after_end_window + 1)
-  ])
-  plt.xlabel("Time".format(dates_before,dates_after))
   if topics:
-    plt.ylabel(str(topic_map[str(feature_num)][:4]) + " Usage")
-  else: 
-    plt.ylabel(str(feature_num) + " Usage")
-  plt.legend()
-  plt.tight_layout()
+    list_features = range(num_feats)
+  else:
+    list_features = range(num_feats) # TODO
 
-  plt_name = "did_feat_{}_cnty{}_time{}{}{}-{}{}{}.png".format( \
-    feature_num,target,x[0].year,x[0].month,x[0].day,x[1].year,x[0].month,x[0].day)
+  for feature_num in list_features:
+    matches_before = np.array(matched_befores[target])
+    matches_after = np.array(matched_befores[target]) + np.array(matched_diffs[target])
+    avg_match_before = np.mean(matches_before[:,feature_num])
+    avg_match_after = np.mean(matches_after[:,feature_num])
+    std_match_before = np.std(matches_before[:,feature_num])
+    std_match_after = np.std(matches_after[:,feature_num])
+    stderr_match_before = std_match_before / np.sqrt(k_neighbors)
+    stderr_match_after = std_match_after / np.sqrt(k_neighbors)
 
-  plt.savefig(plt_name)
+    is_significant = abs(intervention_effects[feature_num]) > stderr_match_after*ci_window
+    if not is_significant: 
+      continue # only plot significant results
+
+    # List significant changes
+    increase_decrease = "increased" if intervention_effects[feature_num] > 0 else "decreased"
+    if topics:
+      print("Change in", topic_map[str(feature_num)][:8], increase_decrease, "significantly -> Topic #", feature_num)
+
+    plt.clf() # reset plot
+
+    # Confidence Intervals
+    ci_down = [target_before[feature_num]-stderr_match_before, target_expected[feature_num]-stderr_match_after]
+    ci_up = [target_before[feature_num]+stderr_match_before, target_expected[feature_num]+stderr_match_after]
+    ci_down_2 = [target_before[feature_num]-stderr_match_before*ci_window, target_expected[feature_num]-stderr_match_after*ci_window]
+    ci_up_2 = [target_before[feature_num]+stderr_match_before*ci_window, target_expected[feature_num]+stderr_match_after*ci_window]
+    
+    # Create Plot
+    fig, ax = plt.subplots()
+    fig.set_size_inches(6, 6)
+    plt.plot(x, [target_before[feature_num], target_after[feature_num]], 'b-', label='Target (Actual)')
+    plt.plot(x, [target_before[feature_num], target_expected[feature_num]],'c--', label='Target (Expected)')
+    plt.plot([x[0]]*30, matches_before[:,feature_num], 'r+', alpha=0.2)
+    plt.plot([x[1]]*30, matches_after[:,feature_num], 'r+', alpha=0.2)
+    plt.plot(x,[avg_match_before,avg_match_after],'r--',label='Average Match')
+    plt.fill_between(x, ci_down, ci_up, color='c', alpha=0.3)
+    plt.fill_between(x, ci_down_2, ci_up_2, color='c', alpha=0.2)
+    plt.plot([x[1],x[1]], [target_after[feature_num], target_expected[feature_num]], 'k--', \
+      label='Intervention Effect ({})'.format(round(intervention_effects[feature_num],5)))
+    plt.title("County " + str(target) + " before/after " + event_name)
+
+    # Format plot
+    plt.gcf().autofmt_xdate()
+    ax.set_xticks(xticks)
+    ax.set_xticklabels([
+      "{} weeks before event".format(default_event_buffer + default_before_start_window + 1),
+      "{} week before event".format(default_event_buffer),
+      "{} week after event".format(default_event_buffer),
+      "{} weeks after event".format(default_event_buffer + default_after_end_window + 1)
+    ])
+    plt.xlabel("Time".format(dates_before,dates_after))
+    if topics:
+      plt.ylabel(str(topic_map[str(feature_num)][:5]) + "\ntopic mentions per 100,000")
+    else: 
+      plt.ylabel(str(feature_num) + " Usage")
+    plt.legend()
+    plt.tight_layout()
+
+    plt_name = "did_feat_{}_cnty{}_time{}{}{}-{}{}{}.png".format( \
+      feature_num,target,x[0].year,x[0].month,x[0].day,x[1].year,x[0].month,x[0].day)
+
+    plt.savefig(plt_name)
 
 # Read in data with cursor
 with connection:
   with connection.cursor(cursors.SSCursor) as cursor:
     print('Connected to',connection.host)
+
+    print("topics",topics)
 
     # Determine the relevant counties
     base_year = 2019
@@ -324,10 +386,16 @@ with connection:
       print('Topic 160  =',topic_map['160'])
       print('Topic 1999 =',topic_map['1999'],'\n')
 
+
+    # Get county feat information
+    if topics:
+      county_feats_json = "/data/smangalik/county_topics_ctlb.json"
+    else: 
+      county_feats_json = "/data/smangalik/county_feats_ctlb.json"
     if not os.path.isfile(county_feats_json):
         #table_years = list(range(2012, 2017))
         table_years = [2019,2020]
-        county_feats = get_county_feats(cursor,table_years,populous_counties)
+        county_feats = get_county_feats(cursor,table_years)
         with open(county_feats_json,"w") as json_file: json.dump(county_feats,json_file)
     start_time = time.time()
     print("Importing produced county features")
@@ -335,16 +403,23 @@ with connection:
       county_feats = json.load(json_file)
     print("--- %s seconds to import ---" % (time.time() - start_time))
 
-    print("county_feats['48117']['2020_19'] =",county_feats['48117']['2020_19'][:4],"...")
-    print("county_feats['11001']['2020_19'] =",county_feats['11001']['2020_19'][:4],"...")
-    print("county_feats['11001']['2020_20'] =",county_feats['11001']['2020_20'][:4],"...")
-    print("county_feats['11001']['2020_21'] =",county_feats['11001']['2020_21'][:4],"...")
-    print("county_feats['11001']['2020_25'] =",county_feats['11001']['2020_25'][:4],"...")
-    print("county_feats['11001']['2020_26'] =",county_feats['11001']['2020_26'][:4],"...")
-    print("county_feats['11001']['2020_27'] =",county_feats['11001']['2020_27'][:4],"...")
-    available_yws = list(county_feats['11001'].keys())
-    available_yws.sort()
-    print("\nAvailable weeks for 11001:",  available_yws)
+    if topics:
+      print("county_feats['48117']['2020_19'] =",county_feats['48117']['2020_19'][:4],"...")
+      print("county_feats['11001']['2020_19'] =",county_feats['11001']['2020_19'][:4],"...")
+      print("county_feats['11001']['2020_20'] =",county_feats['11001']['2020_20'][:4],"...")
+      print("county_feats['11001']['2020_21'] =",county_feats['11001']['2020_21'][:4],"...")
+      print("county_feats['11001']['2020_25'] =",county_feats['11001']['2020_25'][:4],"...")
+      print("county_feats['11001']['2020_26'] =",county_feats['11001']['2020_26'][:4],"...")
+      print("county_feats['11001']['2020_27'] =",county_feats['11001']['2020_27'][:4],"...")
+      available_yws = list(county_feats['11001'].keys())
+      available_yws.sort()
+      print("\nAvailable weeks for 11001:",  available_yws)
+    else: 
+      print("county_feats['11001']['2020_19']['DEP_SCORE'] =",county_feats['11001']['2020_19']['DEP_SCORE'])
+      print("county_feats['11001']['2020_20']['ANX_SCORE'] =",county_feats['11001']['2020_20']['ANX_SCORE'])
+      available_yws = list(county_feats['11001'].keys())
+      available_yws.sort()
+      print("\nAvailable weeks for 11001:",  available_yws)
 
     # Get the closest k_neighbors for each populous_county we want to examine
     county_representation = {}
@@ -453,29 +528,7 @@ with connection:
       x = [middle_before, middle_after]
       xticks = [begin_before, end_before, begin_after, end_after]
 
-      # Plot findings
-      list_features = range(num_feats)
-      for feature_num in list_features:
-        matches_before = np.array(matched_befores[target])
-        matches_after = np.array(matched_befores[target]) + np.array(matched_diffs[target])
-        avg_match_before = np.mean(matches_before[:,feature_num])
-        avg_match_after = np.mean(matches_after[:,feature_num])
-        std_match_before = np.std(matches_before[:,feature_num])
-        std_match_after = np.std(matches_after[:,feature_num])
-        stderr_match_before = std_match_before / np.sqrt(k_neighbors)
-        stderr_match_after = std_match_after / np.sqrt(k_neighbors)
-
-        is_significant = abs(intervention_effects[feature_num]) > stderr_match_after*ci_window
-        if not is_significant: 
-          continue # only plot significant results
-
-        # List significant changes
-        #increase_decrease = "increased" if intervention_effects[feature_num] > 0 else "decreased"
-        #if topics:
-          #print("Change in", topic_map[str(feature_num)][:8], increase_decrease, "significantly -> Topic #", feature_num)
-
-        # Generate plots for each diff in diff change
-        #plot_diff_in_diff_per_county()
+      #plot_diff_in_diff_per_county()
 
     # Aggregated diff in diff
     all_target_befores = np.stack(target_befores.values(), axis=0)
@@ -484,13 +537,14 @@ with connection:
     all_avg_matched_befores = np.stack(avg_matched_befores.values(), axis=0)
     all_avg_matched_diffs = np.stack(avg_matched_diffs.values(), axis=0)
     all_avg_matched_afters = all_avg_matched_befores + all_avg_matched_diffs
-    print("all_target_befores",all_target_befores.shape)
-    print("all_target_diffs",all_target_diffs.shape)
-    print("all_matched_befores",all_avg_matched_befores.shape)
-    print("all_avg_matched_diffs",all_avg_matched_diffs.shape)
 
     # Plot aggregated findings for each feature
-    for feature_num in range(num_feats): # run against all features
+    if topics:
+      list_features = range(num_feats)
+    else:
+      list_features = range(num_feats) # TODO
+
+    for feature_num in list_features: # run against all features
       plt.clf() # reset plot
 
       target_before = np.mean(all_target_befores[:,feature_num]) # average of all targets before [scalar]
@@ -505,7 +559,7 @@ with connection:
       intervention_effect = target_after - target_expected
       
       std_match_before = np.std(all_avg_matched_befores[:,feature_num])
-      std_match_after = np.std(matches_after[:,feature_num])
+      std_match_after = np.std(all_avg_matched_afters[:,feature_num])
       stderr_match_before = std_match_before / np.sqrt(k_neighbors)
       stderr_match_after = std_match_after / np.sqrt(k_neighbors)
 
@@ -538,7 +592,7 @@ with connection:
       plt.fill_between(x, ci_down_2, ci_up_2, color='c', alpha=0.2)
       plt.plot([x[1],x[1]], [target_after, target_expected], 'k--', \
         label='Intervention Effect ({})'.format(round(intervention_effect,5)))
-      plt.title("All counties Before/After " + event_name)
+      plt.title("All counties before/after " + event_name)
 
       # Format plot
       plt.xticks(rotation=45, ha='right')
@@ -551,11 +605,20 @@ with connection:
       ])
       plt.xlabel("Time".format(dates_before,dates_after))
       if topics:
-        plt.ylabel(str(topic_map[str(feature_num)][:4]) + " Usage")
+        plt.ylabel(str(topic_map[str(feature_num)][:4]) + " mentions per 100k")
       else: 
         plt.ylabel(str(feature_num) + " Usage")
       plt.legend()
       plt.tight_layout()
+      
+      if topics:
+        plt_name = "did_topic{}_USA_time_before_after_covid_case.png".format( \
+          feature_num)
+      else:
+        plt_name = "did_{}_USA_time_before_after_covid_case.png".format( \
+          feature_num)
 
-      # plt.show()
-      # TODO save plots
+      plt.savefig(plt_name)
+
+      print("Closing early!") # TODO remove
+      break
