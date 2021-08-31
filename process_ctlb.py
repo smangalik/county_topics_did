@@ -544,6 +544,7 @@ with connection:
     else:
       list_features = range(num_feats) # TODO
 
+    stderr_change_map = {}
     for feature_num in list_features: # run against all features
       plt.clf() # reset plot
 
@@ -566,11 +567,16 @@ with connection:
       is_significant = abs(intervention_effect) > stderr_match_after*ci_window
       if not is_significant: 
         continue # only plot significant results
-      increase_decrease = "increased" if intervention_effects[feature_num] > 0 else "decreased"
+      increase_decrease = "increased" if intervention_effect > 0 else "decreased"
+      stderr_change = intervention_effect/stderr_match_after
       if topics:
-        print("Change in", topic_map[str(feature_num)][:8], increase_decrease, "significantly -> Topic #", feature_num)
+        print("Change in {} {} significantly ({} stderrs) -> Topic #{}".format( \
+          topic_map[str(feature_num)][:8], increase_decrease, stderr_change,feature_num)) 
       else:
-        print("Change in", str(feature_num), increase_decrease, "significantly -> Topic #", feature_num)
+        print("Change in {} {} significantly ({} stderrs)".format( \
+          feature_num, increase_decrease, stderr_change)) 
+
+      stderr_change_map[stderr_change] = feature_num
 
       # Confidence Intervals
       ci_down = [target_before-stderr_match_before, target_expected-stderr_match_after]
@@ -592,7 +598,7 @@ with connection:
       plt.fill_between(x, ci_down_2, ci_up_2, color='c', alpha=0.2)
       plt.plot([x[1],x[1]], [target_after, target_expected], 'k--', \
         label='Intervention Effect ({})'.format(round(intervention_effect,5)))
-      plt.title("All counties before/after " + event_name)
+      plt.title("All US Counties Before/After " + event_name)
 
       # Format plot
       plt.xticks(rotation=45, ha='right')
@@ -619,6 +625,17 @@ with connection:
           feature_num)
 
       plt.savefig(plt_name)
+      break # TODO remove
 
-      print("Closing early!") # TODO remove
-      break
+    # Print out the resuls in sorted order
+    print("\nSorted Results:")
+    for stderr in sorted(stderr_change_map.keys()):
+      feature = stderr_change_map[stderr]
+      if topics:
+        print("Feature {} was {} stderr away (Topic #{})".format(topic_map[str(feature)],stderr,feature))
+      else:
+        print("Feature {} was {} stderr away".format(feature, stderr))
+
+
+
+      
