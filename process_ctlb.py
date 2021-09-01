@@ -44,7 +44,6 @@ pca_components = 5
 # How many of the top populous counties we want to keep
 top_county_count = 300
 
-# TODO allow arbitrary lexicons
 # Number of features studied
 num_feats = 2000
 
@@ -178,7 +177,10 @@ def get_county_feats(cursor, table_years):
       if county_feats.get(county) is None:
         county_feats[county] = {}
       if county_feats[county].get(yearweek) is None:
-        county_feats[county][yearweek] = {}
+        if topics:
+          county_feats[county][yearweek] = np.zeros(num_feats)
+        else:
+          county_feats[county][yearweek] = {}
       county_feats[county][yearweek][feat] = value_norm
 
   return county_feats
@@ -199,6 +201,7 @@ def yearweek_to_dates(yw):
   sunday = monday + datetime.timedelta(days=6)
   return monday, sunday
 
+# Take in a county and some yearweeks, then average their feat usage
 def avg_topic_usage_from_dates(county,dates):
   feat_usages = []
 
@@ -283,7 +286,7 @@ def plot_diff_in_diff_per_county():
   if topics:
     list_features = range(num_feats)
   else:
-    list_features = range(num_feats) # TODO
+    list_features = [] # TODO this will be a list of values
 
   for feature_num in list_features:
     matches_before = np.array(matched_befores[target])
@@ -448,6 +451,29 @@ with connection:
     neighbor_counts = sorted(county_representation.items(), key=lambda kv: kv[1])
     print("\nCount of times each county is a neighbor\n", neighbor_counts[:10],"...",neighbor_counts[-10:], '\n')
 
+    # TODO Calculate Average and Weighted Average Topic Usage
+    county_list = county_feats.keys() # all counties considered in order
+    county_list_weights = [county_representation.get(c,1) for c in county_list] # weight based on neighbor count
+    avg_county_list_usages = np.array([])
+    weighted_avg_county_list_usages = np.array([])
+    if topics:
+      county_list_usages = [] # all averaged counties stacked
+      for county in county_list:
+        yearweeks = list(county_feats[county].keys())
+        county_list_usages.append( avg_topic_usage_from_dates(county,yearweeks) )
+      # county_feats[county][year_week] = [feats numpy array]
+      avg_county_list_usages = np.average(county_list_usages, axis=0)
+      weighted_avg_county_list_usages = np.average(county_list_usages, weights=county_list_weights,  axis=0)
+    else:
+      pass
+      # TODO needs to be implemented
+      # county_feats[county][year_week][feat] = value
+    print(avg_county_list_usages.shape)
+    print(weighted_avg_county_list_usages.shape)
+    
+    
+    
+
     # Calculate diff in diffs dict[county] = [feature_array]
     target_befores = {}
     target_diffs = {}
@@ -530,6 +556,10 @@ with connection:
 
       #plot_diff_in_diff_per_county()
 
+
+    # Aggregate Average Feature Usage
+
+
     # Aggregated diff in diff
     all_target_befores = np.stack(target_befores.values(), axis=0)
     all_target_diffs = np.stack(target_diffs.values(), axis=0)
@@ -542,7 +572,7 @@ with connection:
     if topics:
       list_features = range(num_feats)
     else:
-      list_features = range(num_feats) # TODO
+      list_features = range(num_feats) # TODO fix
 
     stderr_change_map = {}
     for feature_num in list_features: # run against all features
@@ -598,6 +628,8 @@ with connection:
       plt.fill_between(x, ci_down_2, ci_up_2, color='c', alpha=0.2)
       plt.plot([x[1],x[1]], [target_after, target_expected], 'k--', \
         label='Intervention Effect ({})'.format(round(intervention_effect,5)))
+      plt.axhline(y=avg_county_list_usages[feature_num], color='g', linestyle='-',label='Average Topic Usage')
+      plt.axhline(y=weighted_avg_county_list_usages[feature_num], color='g', linestyle='--',label='Weighted Average Topic Usage')
       plt.title("All US Counties Before/After " + event_name)
 
       # Format plot
@@ -625,7 +657,7 @@ with connection:
           feature_num)
 
       plt.savefig(plt_name)
-      break # TODO remove
+      if feature_num > 20: break # TODO remove
 
     # Print out the resuls in sorted order
     print("\nSorted Results:")
