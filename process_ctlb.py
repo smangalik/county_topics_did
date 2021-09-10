@@ -42,7 +42,7 @@ county_factors_fields += ",log_pop_density10, percent_black10,percent_white10, f
 pca_components = 5
 
 # How many of the top populous counties we want to keep
-top_county_count = 300
+top_county_count = 300 # 3232 is the maximum number, has a serious effect on results
 
 # Number of features studied
 num_feats = 2000
@@ -451,7 +451,7 @@ with connection:
     neighbor_counts = sorted(county_representation.items(), key=lambda kv: kv[1])
     print("\nCount of times each county is a neighbor\n", neighbor_counts[:10],"...",neighbor_counts[-10:], '\n')
 
-    # TODO Calculate Average and Weighted Average Topic Usage
+    # Calculate Average and Weighted Average Topic Usage
     county_list = county_feats.keys() # all counties considered in order
     county_list_weights = [county_representation.get(c,1) for c in county_list] # weight based on neighbor count
     avg_county_list_usages = np.array([])
@@ -467,11 +467,7 @@ with connection:
     else:
       pass
       # TODO needs to be implemented
-      # county_feats[county][year_week][feat] = value
-    print(avg_county_list_usages.shape)
-    print(weighted_avg_county_list_usages.shape)
-    
-    
+      # county_feats[county][year_week][feat] = value    
     
 
     # Calculate diff in diffs dict[county] = [feature_array]
@@ -664,9 +660,9 @@ with connection:
     for stderr in sorted(stderr_change_map.keys()):
       feature = stderr_change_map[stderr]
       if topics:
-        print("Feature {} was {} stderr away (Topic #{})".format(topic_map[str(feature)],stderr,feature))
+        print("{} was {} stderr away (Topic #{})".format(topic_map[str(feature)],stderr,feature))
       else:
-        print("Feature {} was {} stderr away".format(feature, stderr))
+        print("{} was {} stderr away".format(feature, stderr))
 
 
 
