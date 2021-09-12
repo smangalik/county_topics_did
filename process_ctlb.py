@@ -428,25 +428,38 @@ with connection:
     county_representation = {}
 
     matched_counties = {}
+
+    already_matched = []
+
     for target in populous_counties:
 
       # Get the k top neighbors
       county_index = list(populous_counties).index(target)
       n_neighbors = neighbors.kneighbors([county_factors[county_index]], k_neighbors + 1, return_distance=False)
       matched_counties[target] = []
+
+      # TODO pick the 1 closest neighbor with a greedy search
+      match_found = False
       for i, n in enumerate(n_neighbors[0][1:]): # skip 0th entry (self)
-          ith_closest_county = populous_counties[n]
 
-          # determine how much each county appears
-          if ith_closest_county not in county_representation.keys():
-            county_representation[ith_closest_county] = 0
-          county_representation[ith_closest_county] += 1
+        ith_closest_county = populous_counties[n]
 
-          # TODO filter out counties with county events close by in time
-          ith_closest_county_event, _, _ = first_covid_case.get(target,[None,None,None])
-          # if abs(ith_closest_county_event - target_event) < event_timing_buffer: continue
+        # determine how much each county appears
+        if ith_closest_county not in county_representation.keys():
+          county_representation[ith_closest_county] = 0
+        county_representation[ith_closest_county] += 1
 
+        if match_found:
+          continue
+
+        # TODO filter out counties with county events close by in time
+        ith_closest_county_event, _, _ = first_covid_case.get(target,[None,None,None])
+        # if abs(ith_closest_county_event - target_event) < event_timing_buffer: continue
+
+        if ith_closest_county not in already_matched:
           matched_counties[target].append(ith_closest_county)
+          already_matched.append(ith_closest_county)
+          match_found = True
 
     neighbor_counts = sorted(county_representation.items(), key=lambda kv: kv[1])
     print("\nCount of times each county is a neighbor\n", neighbor_counts[:10],"...",neighbor_counts[-10:], '\n')
@@ -506,14 +519,18 @@ with connection:
       matched_diffs[target] = []
       matched_befores[target] = []
       for matched_county in matched_counties_considered:
-          matched_before, matched_after, _, _ = feat_usage_before_and_after(matched_county, event_start=target_event_start, event_end=target_event_end)
-          if matched_before is None or matched_after is None: continue
-          matched_diff = np.subtract(matched_after,matched_before)
+        matched_before, matched_after, _, _ = feat_usage_before_and_after(matched_county, event_start=target_event_start, event_end=target_event_end)
+        if matched_before is None or matched_after is None: continue
+        matched_diff = np.subtract(matched_after,matched_before)
 
-          # Add all differences, then divide by num of considered counties
-          matched_diffs[target].append(matched_diff)
-          matched_befores[target].append(matched_before)
-          avg_matched_befores[target] = np.mean(matched_befores[target], axis=0)
+        # Add all differences, then divide by num of considered counties
+        matched_diffs[target].append(matched_diff)
+        matched_befores[target].append(matched_before)
+      
+      if matched_befores[target] == []:
+        continue # this target is not viable (no match data)
+
+      avg_matched_befores[target] = matched_befores[target][0] #np.mean(matched_befores[target], axis=0)
 
       # print('target_diffs',target_diffs)
       # print('matched_diffs',matched_diffs)
@@ -624,8 +641,8 @@ with connection:
       plt.fill_between(x, ci_down_2, ci_up_2, color='c', alpha=0.2)
       plt.plot([x[1],x[1]], [target_after, target_expected], 'k--', \
         label='Intervention Effect ({})'.format(round(intervention_effect,5)))
-      plt.axhline(y=avg_county_list_usages[feature_num], color='g', linestyle='-',label='Average Topic Usage')
-      plt.axhline(y=weighted_avg_county_list_usages[feature_num], color='g', linestyle='--',label='Weighted Average Topic Usage')
+      #plt.axhline(y=avg_county_list_usages[feature_num], color='g', linestyle='-',label='Average Topic Usage')
+      #plt.axhline(y=weighted_avg_county_list_usages[feature_num], color='g', linestyle='--',label='Weighted Average Topic Usage')
       plt.title("All US Counties Before/After " + event_name)
 
       # Format plot

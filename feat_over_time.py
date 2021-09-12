@@ -115,8 +115,8 @@ with connection:
         monday, sunday = yearweek_to_dates(yw)
         avg_anx = np.mean(yw_anx_score[yw])
         avg_dep = np.mean(yw_dep_score[yw])
-        ci_anx = np.std(yw_anx_score[yw]) # / len(yw_anx_score[yw]) 
-        ci_dep =  np.std(yw_dep_score[yw]) # / len(yw_dep_score[yw]) 
+        ci_anx = np.std(yw_anx_score[yw]) #/ len(yw_anx_score[yw]) # TODO this is way too small
+        ci_dep =  np.std(yw_dep_score[yw]) #/ len(yw_dep_score[yw]) 
 
         x.append(sunday)
         avg_anxs.append(avg_anx)
@@ -128,9 +128,9 @@ with connection:
 
     # plot results
     plt.plot(x, avg_anxs, 'b-', label='Average Anxiety')
-    #plt.plot(x, avg_deps, 'r-', label='Average Depression')
-    plt.fill_between(x, ci_anx_downs, ci_anx_ups, color='c', alpha=0.2)
-    #plt.fill_between(x, ci_dep_downs, ci_dep_ups, color='pink', alpha=0.2)
+    plt.plot(x, avg_deps, 'r-', label='Average Depression')
+    plt.fill_between(x, ci_anx_downs, ci_anx_ups, color='c', alpha=0.3) # error area
+    plt.fill_between(x, ci_dep_downs, ci_dep_ups, color='pink', alpha=0.3) # error area
 
     # Make plot pretty
     plt.title("Depression/Anxiety Over Time")
@@ -139,7 +139,7 @@ with connection:
     plt.gcf().autofmt_xdate()
     plt.legend()
     plt.tight_layout()
-    plt.show()
+    plt.savefig("depression_and_anxiety.png")
 
 
     
