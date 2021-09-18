@@ -2,14 +2,18 @@
 run as `python3 feat_over_time.py` 
 """
 
-import os, time, json, datetime
+import os, time, json, datetime, sys
 
 import numpy as np
 import matplotlib.pyplot as plt
+import pandas as pd
+
+from pandas.plotting import register_matplotlib_converters
 
 from pymysql import cursors, connect
 from tqdm import tqdm
 
+register_matplotlib_converters()
 
 # Open default connection
 print('Connecting to MySQL...')
@@ -103,34 +107,57 @@ with connection:
                 yw_dep_score[yearweek] = []
             yw_dep_score[yearweek].append( county_feats[county][yearweek]['DEP_SCORE'] )
 
-    # Plot results
-    x = []
-    avg_anxs = []
-    avg_deps = []
-    ci_anx_ups = []
-    ci_anx_downs = []
-    ci_dep_ups = []
-    ci_dep_downs = []
+    # Store results
+    columns = ['date','avg_anx','avg_dep','std_anx','std_dep','n']
+    df = pd.DataFrame(columns=columns)
+
     for yw in available_yws:
         monday, sunday = yearweek_to_dates(yw)
         avg_anx = np.mean(yw_anx_score[yw])
         avg_dep = np.mean(yw_dep_score[yw])
-        ci_anx = np.std(yw_anx_score[yw]) #/ len(yw_anx_score[yw]) # TODO this is way too small
-        ci_dep =  np.std(yw_dep_score[yw]) #/ len(yw_dep_score[yw]) 
+        n = float(min(len(yw_anx_score[yw]), len(yw_dep_score[yw])))
+        std_anx = np.std(yw_anx_score[yw])
+        std_dep =  np.std(yw_dep_score[yw]) 
 
-        x.append(sunday)
-        avg_anxs.append(avg_anx)
-        avg_deps.append(avg_dep)
-        ci_anx_ups.append(avg_anx + ci_anx)
-        ci_anx_downs.append(avg_anx - ci_anx)
-        ci_dep_ups.append(avg_dep + ci_dep)
-        ci_dep_downs.append(avg_dep - ci_dep)
+        # x.append(monday)
+        # avg_anxs.append(avg_anx)
+        # avg_deps.append(avg_dep)
+        # ci_anx_ups.append(avg_anx + ci_anx)
+        # ci_anx_downs.append(avg_anx - ci_anx)
+        # ci_dep_ups.append(avg_dep + ci_dep)
+        # ci_dep_downs.append(avg_dep - ci_dep)
 
-    # plot results
-    plt.plot(x, avg_anxs, 'b-', label='Average Anxiety')
-    plt.plot(x, avg_deps, 'r-', label='Average Depression')
-    plt.fill_between(x, ci_anx_downs, ci_anx_ups, color='c', alpha=0.3) # error area
-    plt.fill_between(x, ci_dep_downs, ci_dep_ups, color='pink', alpha=0.3) # error area
+        df2 = pd.DataFrame([[monday, avg_anx, avg_dep, std_anx, std_dep, n]], columns=columns)
+        df = df.append(df2, ignore_index = True)
+
+    print(df.head())
+
+    # Group if necessary
+    df.set_index('date', inplace=True) 
+    df = df.groupby(pd.Grouper(freq='Q')).mean()
+
+    print(df.head())
+
+    # Calculate columns
+    df['ci_anx'] = df['std_anx'] / df['n']**(0.5)
+    df['ci_dep'] = df['std_dep'] / df['n']**(0.5)
+    df['ci_anx_up'] = df['avg_anx'] + df['ci_anx']
+    df['ci_anx_down'] = df['avg_anx'] - df['ci_anx']
+    df['ci_dep_up'] = df['avg_dep'] + df['ci_dep']
+    df['ci_dep_down'] = df['avg_dep'] - df['ci_dep']
+
+    print(df.head())
+
+    # Set up plot
+    fig, ax = plt.subplots(1)
+    fig.set_size_inches(18, 8)
+
+    # Create plots
+    x = df.index.tolist()
+    anx_line = plt.plot(x, df['avg_anx'], 'b-', label='Average Anxiety')
+    dep_line = plt.plot(x, df['avg_dep'], 'r-', label='Average Depression')
+    anx_area = plt.fill_between(x, df['ci_anx_down'].tolist(), df['ci_anx_up'].tolist(), color='c', alpha=0.4) # error area
+    dep_area = plt.fill_between(x, df['ci_dep_down'].tolist(), df['ci_dep_up'].tolist(), color='pink', alpha=0.4) # error area
 
     # Make plot pretty
     plt.title("Depression/Anxiety Over Time")
@@ -138,9 +165,41 @@ with connection:
     plt.ylabel("Feature Score")
     plt.gcf().autofmt_xdate()
     plt.legend()
-    plt.tight_layout()
-    plt.savefig("depression_and_anxiety.png")
+    dates= list(pd.date_range('2019-01-01','2021-01-01' , freq='1M')-pd.offsets.MonthBegin(1))
+    plt.xticks(dates)
 
+    # plot everything
+    plt.savefig("over_time_depression_and_anxiety.png", bbox_inches='tight')
+
+    # remove anxiety
+    trash = anx_line.pop(0)
+    trash.remove()
+    ax.collections.remove(anx_area)
+    ax.relim()
+    ax.autoscale()
+    plt.draw()
+    plt.savefig("over_time_depression.png", bbox_inches='tight')
+
+    # remove depression, add anxiety 
+    trash = dep_line.pop(0)
+    trash.remove()
+    ax.collections.remove(dep_area)
+    anx_line = plt.plot(x, df['avg_anx'], 'b-', label='Average Anxiety')
+    anx_area = plt.fill_between(x, df['ci_anx_down'].tolist(), df['ci_anx_up'].tolist(), color='c', alpha=0.4)
+    ax.relim()
+    ax.autoscale()
+    plt.draw()
+    plt.savefig("over_time_anxiety.png", bbox_inches='tight')
+
+    # remove anxiety, add n 
+    trash = anx_line.pop(0)
+    trash.remove()
+    ax.collections.remove(anx_area)
+    plt.plot(x, df['n'], 'g-', label='n')
+    ax.relim()
+    ax.autoscale()
+    plt.draw()
+    plt.savefig("over_time_n.png", bbox_inches='tight')
 
     
 

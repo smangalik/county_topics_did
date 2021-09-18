@@ -367,7 +367,6 @@ with connection:
     
 
     # Create county_factor matrix and n-neighbors mdoel
-    # TODO use better 2020 data in general
     county_factors, neighbors, populous_counties = get_county_factors(cursor, 2016, populous_counties)
     print('\nCounty factor matrix shape:',county_factors.shape)
 
@@ -438,11 +437,23 @@ with connection:
       n_neighbors = neighbors.kneighbors([county_factors[county_index]], k_neighbors + 1, return_distance=False)
       matched_counties[target] = []
 
-      # TODO pick the 1 closest neighbor with a greedy search
+      # county event date for target, skip if no event
+      target_county_event, _, _ = first_covid_case.get(target,[None,None,None])
+
+      # pick the 1 closest neighbor with a greedy search
       match_found = False
       for i, n in enumerate(n_neighbors[0][1:]): # skip 0th entry (self)
 
         ith_closest_county = populous_counties[n]
+
+        # Don't match with counties that have no relevant data
+        ith_closest_county_event, _, _ = first_covid_case.get(ith_closest_county,[None,None,None])
+        if ith_closest_county_event == None:
+          continue
+
+        # filter out counties with county events close by in time
+        if date_to_yearweek(target_county_event) == date_to_yearweek(ith_closest_county_event):
+          continue
 
         # determine how much each county appears
         if ith_closest_county not in county_representation.keys():
@@ -452,10 +463,7 @@ with connection:
         if match_found:
           continue
 
-        # TODO filter out counties with county events close by in time
-        ith_closest_county_event, _, _ = first_covid_case.get(target,[None,None,None])
-        # if abs(ith_closest_county_event - target_event) < event_timing_buffer: continue
-
+        # TODO don't match up counties that don't have enough data from feat_usage_before_and_after()
         if ith_closest_county not in already_matched:
           matched_counties[target].append(ith_closest_county)
           already_matched.append(ith_closest_county)
@@ -669,15 +677,16 @@ with connection:
         plt_name = "did_{}_USA_time_before_after_covid_case.png".format( \
           feature_num)
 
-      plt.savefig(plt_name)
-      if feature_num > 20: break # TODO remove
+      #plt.savefig(plt_name)
+      #if feature_num > 20: break # TODO remove, used to stop early
 
     # Print out the resuls in sorted order
     print("\nSorted Results:")
     for stderr in sorted(stderr_change_map.keys()):
       feature = stderr_change_map[stderr]
       if topics:
-        print("{} was {} stderr away (Topic #{})".format(topic_map[str(feature)],stderr,feature))
+        print("{} was {} stderr away (Topic #{})".format(
+          topic_map[str(feature)][:6], round(stderr,4), feature))
       else:
         print("{} was {} stderr away".format(feature, stderr))
 
