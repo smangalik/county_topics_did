@@ -10,6 +10,7 @@ import pandas as pd
 
 from pandas.plotting import register_matplotlib_converters
 
+
 from pymysql import cursors, connect
 from tqdm import tqdm
 
@@ -130,13 +131,9 @@ with connection:
         df2 = pd.DataFrame([[monday, avg_anx, avg_dep, std_anx, std_dep, n]], columns=columns)
         df = df.append(df2, ignore_index = True)
 
-    print(df.head())
-
-    # Group if necessary
+    # GROUP BY if necessary
     df.set_index('date', inplace=True) 
-    df = df.groupby(pd.Grouper(freq='Q')).mean()
-
-    print(df.head())
+    #df = df.groupby(pd.Grouper(freq='Q')).mean()
 
     # Calculate columns
     df['ci_anx'] = df['std_anx'] / df['n']**(0.5)
@@ -200,6 +197,26 @@ with connection:
     ax.autoscale()
     plt.draw()
     plt.savefig("over_time_n.png", bbox_inches='tight')
+
+    # Baseline plot
+    plt.clf()
+    household_pulse = pd.read_csv("./household_pulse_weekly.csv")
+    household_pulse['yearweek'] = "2020_" + household_pulse['week'].astype(str).str.zfill(2)
+    household_pulse['date'] = household_pulse['yearweek'].apply(lambda yw: yearweek_to_dates(yw)[1])
+    print("\n",household_pulse)
+    x = household_pulse['date'].tolist()
+    anx_line = plt.plot(x, household_pulse['avg(gad2_sum)'], 'b-', label='Worry and Anxiety (0 is best)')
+    dep_line = plt.plot(x, household_pulse['avg(phq2_sum)'], 'r-', label='Disinterest and Depression (0 is best)')
+    dep_line = plt.plot(x, household_pulse['avg(gen_health)'], 'g-', label='General Health (5 is best)')
+    plt.title("Baselines Over Time")
+    plt.xlabel("Time")
+    plt.ylabel("Feature Score")
+    plt.gcf().autofmt_xdate()
+    plt.legend()
+    dates= list(pd.date_range('2019-01-01','2021-01-01' , freq='1M')-pd.offsets.MonthBegin(1))
+    plt.xticks(dates)
+    plt.savefig("health_baselines.png", bbox_inches='tight')
+
 
     
 
