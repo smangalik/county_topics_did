@@ -4,6 +4,8 @@ run as `python3 feat_over_time.py`
 
 import os, time, json, datetime, sys
 
+from cycler import cycler
+
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -20,6 +22,10 @@ register_matplotlib_converters()
 print('Connecting to MySQL...')
 connection  = connect(read_default_file="~/.my.cnf")
 
+# Get supplemental data
+county_info = pd.read_csv("county_fips_data.csv",encoding = "utf-8")
+county_info['fips'] = county_info['fips'].astype(str).str.zfill(5)
+
 # Iterate over all time units to create county_feats[county][year_week] = feats
 def get_county_feats(cursor, table_years):
   county_feats = {}
@@ -31,8 +37,7 @@ def get_county_feats(cursor, table_years):
 
     for result in tqdm(cursor.fetchall_unbuffered()): # Read _unbuffered() to save memory
       
-      # TODO do we want to use the values directly or the value norms?
-      # TODO if we use value directly do we want to clip it?
+      # TODO how do we want to process the value_norm?
       yw_county, feat, value, value_norm = result
 
       if feat == '_int': continue
@@ -60,6 +65,85 @@ def yearweek_to_dates(yw):
   sunday = monday + datetime.timedelta(days=6)
   return monday, sunday
 
+def county_list_to_df(county_list):
+  # Get all available year weeks in order
+  available_yws = []
+  for county in county_list: 
+      available_yws.extend( list(county_feats[county].keys()) )
+  available_yws = list(set(available_yws))
+  available_yws.sort()
+  # print("All available year weeks:",available_yws,"\n")
+
+  # Get feature scores over time
+  # yw_anx_score[yearweek] = [ all anx_scores... ]
+  yw_anx_score = {}
+  yw_dep_score = {}
+  
+  for county in county_list:
+      yearweeks = list(county_feats[county].keys())
+      for yearweek in yearweeks:
+          # Add anxiety scores              
+          if yearweek not in yw_anx_score.keys():
+              yw_anx_score[yearweek] = []
+          yw_anx_score[yearweek].append( county_feats[county][yearweek]['ANX_SCORE'] )
+
+          # Add depression scores              
+          if yearweek not in yw_dep_score.keys():
+              yw_dep_score[yearweek] = []
+          yw_dep_score[yearweek].append( county_feats[county][yearweek]['DEP_SCORE'] )
+
+  # Store results
+  columns = ['date','avg_anx','avg_dep','std_anx','std_dep','n']
+  df = pd.DataFrame(columns=columns)
+
+  for yw in available_yws:
+      monday, sunday = yearweek_to_dates(yw)
+
+      avg_anx = np.mean(yw_anx_score[yw])
+      avg_dep = np.mean(yw_dep_score[yw])
+      n = float(min(len(yw_anx_score[yw]), len(yw_dep_score[yw])))
+      std_anx = np.std(yw_anx_score[yw])
+      std_dep =  np.std(yw_dep_score[yw]) 
+
+      df2 = pd.DataFrame([[monday, avg_anx, avg_dep, std_anx, std_dep, n]], columns=columns)
+      df = df.append(df2, ignore_index = True)
+
+  # GROUP BY if necessary
+  df.set_index('date', inplace=True) 
+  #df = df.groupby(pd.Grouper(freq='Q')).mean() # Q = Quarterly, M = Monthly
+
+  # Calculate columns
+  df['ci_anx'] = df['std_anx'] / df['n']**(0.5) # remove sqrt for std-dev
+  df['ci_dep'] = df['std_dep'] / df['n']**(0.5) # remove sqrt for std-dev
+  df['ci_anx_up'] = df['avg_anx'] + df['ci_anx']
+  df['ci_anx_down'] = df['avg_anx'] - df['ci_anx']
+  df['ci_dep_up'] = df['avg_dep'] + df['ci_dep']
+  df['ci_dep_down'] = df['avg_dep'] - df['ci_dep']
+
+  return df
+
+def plot_depression(counties_of_interest, counties_name, stderr=True):
+  counties_of_interest = list(set(county_feats.keys() ) & set(counties_of_interest))
+  df = county_list_to_df(counties_of_interest)
+
+  x = df.index.tolist()
+  label = 'Average Depression ' + counties_name
+  print("Plotting",label)
+  plt.plot(x, df['avg_dep'],  label=label)
+  if stderr:
+    plt.fill_between(x, df['ci_dep_down'].tolist(), df['ci_dep_up'].tolist(), alpha=0.3) # error area
+
+def plot_anxiety(counties_of_interest, counties_name, stderr=True):
+  counties_of_interest = list(set(county_feats.keys() ) & set(counties_of_interest))
+  df = county_list_to_df(counties_of_interest)
+
+  x = df.index.tolist()
+  label = 'Average Anxiety ' + counties_name
+  print("Plotting",label)
+  plt.plot(x, df['avg_anx'],  label=label)
+  if stderr:
+    plt.fill_between(x, df['ci_anx_down'].tolist(), df['ci_anx_up'].tolist(), alpha=0.3) # error area
+
 with connection:
   with connection.cursor(cursors.SSCursor) as cursor:
     print('Connected to',connection.host)
@@ -77,133 +161,116 @@ with connection:
     with open(county_feats_json) as json_file: 
         county_feats = json.load(json_file)
 
-    # TODO do we need to scale the features by population or is it better to not?
+    # Limit county list to one state/region/division at a time
+    ny_counties = county_info.loc[county_info['state_abbr'] == "NY", 'fips'].tolist()
+    al_counties = county_info.loc[county_info['state_abbr'] == "AL", 'fips'].tolist()
+    ca_counties = county_info.loc[county_info['state_abbr'] == "CA", 'fips'].tolist()
+    tx_counties = county_info.loc[county_info['state_abbr'] == "TX", 'fips'].tolist()
+    oh_counties = county_info.loc[county_info['state_abbr'] == "OH", 'fips'].tolist()
+    r1_counties = county_info.loc[county_info['region'] == 1, 'fips'].tolist() # North East
+    r2_counties = county_info.loc[county_info['region'] == 2, 'fips'].tolist() #Midwest
+    r3_counties = county_info.loc[county_info['region'] == 3, 'fips'].tolist() # South
+    r4_counties = county_info.loc[county_info['region'] == 4, 'fips'].tolist() # West
+    d1_counties = county_info.loc[county_info['division'] == 1, 'fips'].tolist() # New England
+    d9_counties = county_info.loc[county_info['division'] == 9, 'fips'].tolist() # Pacific
 
-    county_list = county_feats.keys() 
+    regions = [r1_counties,r2_counties,r3_counties,r4_counties]
+    region_names = ["in the Northeast","in the Midwest","in the South","in the Pacific"]
+    #divisions = [d1_counties,d2_counties,d3_counties,d4_counties,d5_counties,d6_counties,d7_counties,d8_counties,d9_counties]
 
-    # Get all available year weeks in order
-    available_yws = []
-    for county in county_list:
-        available_yws.extend( list(county_feats[county].keys()) )
-    available_yws = list(set(available_yws))
-    available_yws.sort()
-    print("All available year weeks:",available_yws,"\n")
-
-    # Get feature scores over time
-    # yw_anx_score[yearweek] = [ all anx_scores... ]
-    yw_anx_score = {}
-    yw_dep_score = {}
-
+    all_counties = county_feats.keys() 
+    county_list = all_counties
+    #county_list = list(set(county_feats.keys() ) & set(ny_counties)) # TODO REMOVE
+    #print("Counties considered:", county_list, "\n")
     
-    for county in county_list:
-        yearweeks = list(county_feats[county].keys())
-        for yearweek in yearweeks:
-            # Add anxiety scores              
-            if yearweek not in yw_anx_score.keys():
-                yw_anx_score[yearweek] = []
-            yw_anx_score[yearweek].append( county_feats[county][yearweek]['ANX_SCORE'] )
+    df = county_list_to_df(county_list)    
 
-            # Add depression scores              
-            if yearweek not in yw_dep_score.keys():
-                yw_dep_score[yearweek] = []
-            yw_dep_score[yearweek].append( county_feats[county][yearweek]['DEP_SCORE'] )
-
-    # Store results
-    columns = ['date','avg_anx','avg_dep','std_anx','std_dep','n']
-    df = pd.DataFrame(columns=columns)
-
-    for yw in available_yws:
-        monday, sunday = yearweek_to_dates(yw)
-        avg_anx = np.mean(yw_anx_score[yw])
-        avg_dep = np.mean(yw_dep_score[yw])
-        n = float(min(len(yw_anx_score[yw]), len(yw_dep_score[yw])))
-        std_anx = np.std(yw_anx_score[yw])
-        std_dep =  np.std(yw_dep_score[yw]) 
-
-        # x.append(monday)
-        # avg_anxs.append(avg_anx)
-        # avg_deps.append(avg_dep)
-        # ci_anx_ups.append(avg_anx + ci_anx)
-        # ci_anx_downs.append(avg_anx - ci_anx)
-        # ci_dep_ups.append(avg_dep + ci_dep)
-        # ci_dep_downs.append(avg_dep - ci_dep)
-
-        df2 = pd.DataFrame([[monday, avg_anx, avg_dep, std_anx, std_dep, n]], columns=columns)
-        df = df.append(df2, ignore_index = True)
-
-    # GROUP BY if necessary
-    df.set_index('date', inplace=True) 
-    #df = df.groupby(pd.Grouper(freq='Q')).mean()
-
-    # Calculate columns
-    df['ci_anx'] = df['std_anx'] / df['n']**(0.5)
-    df['ci_dep'] = df['std_dep'] / df['n']**(0.5)
-    df['ci_anx_up'] = df['avg_anx'] + df['ci_anx']
-    df['ci_anx_down'] = df['avg_anx'] - df['ci_anx']
-    df['ci_dep_up'] = df['avg_dep'] + df['ci_dep']
-    df['ci_dep_down'] = df['avg_dep'] - df['ci_dep']
-
-    print(df.head())
+    #print(df.head())
 
     # Set up plot
     fig, ax = plt.subplots(1)
     fig.set_size_inches(18, 8)
 
-    # Create plots
     x = df.index.tolist()
+
+    # Plot Depression and Anxiety
     anx_line = plt.plot(x, df['avg_anx'], 'b-', label='Average Anxiety')
     dep_line = plt.plot(x, df['avg_dep'], 'r-', label='Average Depression')
     anx_area = plt.fill_between(x, df['ci_anx_down'].tolist(), df['ci_anx_up'].tolist(), color='c', alpha=0.4) # error area
     dep_area = plt.fill_between(x, df['ci_dep_down'].tolist(), df['ci_dep_up'].tolist(), color='pink', alpha=0.4) # error area
-
     # Make plot pretty
-    plt.title("Depression/Anxiety Over Time")
+    plt.title("Depression & Anxiety Over Time")
     plt.xlabel("Time")
     plt.ylabel("Feature Score")
     plt.gcf().autofmt_xdate()
     plt.legend()
     dates= list(pd.date_range('2019-01-01','2021-01-01' , freq='1M')-pd.offsets.MonthBegin(1))
     plt.xticks(dates)
-
-    # plot everything
+    # Plot everything
     plt.savefig("over_time_depression_and_anxiety.png", bbox_inches='tight')
 
-    # remove anxiety
-    trash = anx_line.pop(0)
-    trash.remove()
-    ax.collections.remove(anx_area)
-    ax.relim()
-    ax.autoscale()
-    plt.draw()
+    # Depression Plot
+    plt.clf()
+    #plot_depression(ny_counties, "in New York")
+    #for region,region_name in zip(regions,region_names): plot_depression(region, region_name, stderr=False)
+    plot_depression(d1_counties, "in New England")
+    plot_depression(all_counties, "Nationally")
+    ax.set_prop_cycle(cycler('color', ['c', 'm', 'y', 'k']) + cycler('lw', [1, 2, 3, 4]))
+    # Make plot pretty
+    plt.title("Depression Over Time")
+    plt.xlabel("Time")
+    plt.ylabel("Depression Score")
+    plt.gcf().autofmt_xdate()
+    plt.legend()
+    dates= list(pd.date_range('2019-01-01','2021-01-01' , freq='1M')-pd.offsets.MonthBegin(1))
+    plt.xticks(dates)
+    # Plot everything
     plt.savefig("over_time_depression.png", bbox_inches='tight')
 
-    # remove depression, add anxiety 
-    trash = dep_line.pop(0)
-    trash.remove()
-    ax.collections.remove(dep_area)
-    anx_line = plt.plot(x, df['avg_anx'], 'b-', label='Average Anxiety')
-    anx_area = plt.fill_between(x, df['ci_anx_down'].tolist(), df['ci_anx_up'].tolist(), color='c', alpha=0.4)
-    ax.relim()
-    ax.autoscale()
-    plt.draw()
+    # Anxiety Plot
+    plt.clf()
+    #plot_anxiety(ny_counties, "in New York")
+    #for region,region_name in zip(regions,region_names): plot_anxiety(region, region_name, stderr=False)
+    plot_anxiety(d1_counties, "in New England")
+    plot_anxiety(all_counties, "Nationally")
+    # Make plot pretty
+    plt.title("Anxiety Over Time")
+    plt.xlabel("Time")
+    plt.ylabel("Anxiety Score")
+    plt.gcf().autofmt_xdate()
+    plt.legend()
+    dates= list(pd.date_range('2019-01-01','2021-01-01' , freq='1M')-pd.offsets.MonthBegin(1))
+    plt.xticks(dates)
+    # Plot everything
     plt.savefig("over_time_anxiety.png", bbox_inches='tight')
 
-    # remove anxiety, add n 
-    trash = anx_line.pop(0)
-    trash.remove()
-    ax.collections.remove(anx_area)
-    plt.plot(x, df['n'], 'g-', label='n')
-    ax.relim()
-    ax.autoscale()
+    # Valid Counties Plot
+    plt.clf()
+    df = county_list_to_df(all_counties)
+    x = df.index.tolist()
+    plt.plot(x, df['n'], 'g-', label='# of Valid Counties')
+    # Make plot pretty
+    plt.title("Valid Counties Over Time")
+    plt.xlabel("Time")
+    plt.ylabel("Valid Counties")
+    plt.gcf().autofmt_xdate()
+    plt.legend()
+    dates= list(pd.date_range('2019-01-01','2021-01-01' , freq='1M')-pd.offsets.MonthBegin(1))
+    plt.xticks(dates)
+    # Plot everything   
+    plt.ylim(ymin=0)
+    ax.set_ylim(ymin=0)
+    ax.set_ylim(bottom=0)
     plt.draw()
     plt.savefig("over_time_n.png", bbox_inches='tight')
 
-    # Baseline plot
+    # Baseline Plot
     plt.clf()
     household_pulse = pd.read_csv("./household_pulse_weekly.csv")
-    household_pulse['yearweek'] = "2020_" + household_pulse['week'].astype(str).str.zfill(2)
+    household_pulse['corrected_week'] = household_pulse['week'] + 18
+    household_pulse['yearweek'] = "2020_" + household_pulse['corrected_week'].astype(str).str.zfill(2)
     household_pulse['date'] = household_pulse['yearweek'].apply(lambda yw: yearweek_to_dates(yw)[1])
-    print("\n",household_pulse)
+    print("\nHousehold Pulse\n",household_pulse)
     x = household_pulse['date'].tolist()
     anx_line = plt.plot(x, household_pulse['avg(gad2_sum)'], 'b-', label='Worry and Anxiety (0 is best)')
     dep_line = plt.plot(x, household_pulse['avg(phq2_sum)'], 'r-', label='Disinterest and Depression (0 is best)')
@@ -214,8 +281,8 @@ with connection:
     plt.gcf().autofmt_xdate()
     plt.legend()
     dates= list(pd.date_range('2019-01-01','2021-01-01' , freq='1M')-pd.offsets.MonthBegin(1))
-    plt.xticks(dates)
-    plt.savefig("health_baselines.png", bbox_inches='tight')
+    plt.xticks(dates)  
+    plt.savefig("over_time_health_baselines.png", bbox_inches='tight')
 
 
     
