@@ -6,6 +6,7 @@ import os, time, json, datetime, sys
 
 from cycler import cycler
 
+import datetime as dt
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -144,6 +145,11 @@ def plot_anxiety(counties_of_interest, counties_name, stderr=True):
   if stderr:
     plt.fill_between(x, df['ci_anx_down'].tolist(), df['ci_anx_up'].tolist(), alpha=0.3) # error area
 
+def plot_events():
+  plt.axvline(dt.datetime(2019, 12, 25), color="g", label="Christmas") 
+  plt.axvline(dt.datetime(2020, 5, 25), color="g", label="George Floyd")
+  plt.axvline(dt.datetime(2020, 11, 7), color="g", label="Presidential Election Results") 
+
 with connection:
   with connection.cursor(cursors.SSCursor) as cursor:
     print('Connected to',connection.host)
@@ -168,14 +174,17 @@ with connection:
     tx_counties = county_info.loc[county_info['state_abbr'] == "TX", 'fips'].tolist()
     oh_counties = county_info.loc[county_info['state_abbr'] == "OH", 'fips'].tolist()
     r1_counties = county_info.loc[county_info['region'] == 1, 'fips'].tolist() # North East
-    r2_counties = county_info.loc[county_info['region'] == 2, 'fips'].tolist() #Midwest
+    r2_counties = county_info.loc[county_info['region'] == 2, 'fips'].tolist() # Midwest
     r3_counties = county_info.loc[county_info['region'] == 3, 'fips'].tolist() # South
     r4_counties = county_info.loc[county_info['region'] == 4, 'fips'].tolist() # West
     d1_counties = county_info.loc[county_info['division'] == 1, 'fips'].tolist() # New England
     d9_counties = county_info.loc[county_info['division'] == 9, 'fips'].tolist() # Pacific
 
+    # TODO Top 5 counties by population
+    top_pop = ['06037','17031','48201','04013','06073'] # LA, Cook, Harris, Maricopa, San Diego
+
     regions = [r1_counties,r2_counties,r3_counties,r4_counties]
-    region_names = ["in the Northeast","in the Midwest","in the South","in the Pacific"]
+    region_names = ["in the Northeast","in the Midwest","in the South","in the West"]
     #divisions = [d1_counties,d2_counties,d3_counties,d4_counties,d5_counties,d6_counties,d7_counties,d8_counties,d9_counties]
 
     all_counties = county_feats.keys() 
@@ -198,6 +207,8 @@ with connection:
     dep_line = plt.plot(x, df['avg_dep'], 'r-', label='Average Depression')
     anx_area = plt.fill_between(x, df['ci_anx_down'].tolist(), df['ci_anx_up'].tolist(), color='c', alpha=0.4) # error area
     dep_area = plt.fill_between(x, df['ci_dep_down'].tolist(), df['ci_dep_up'].tolist(), color='pink', alpha=0.4) # error area
+    # Events
+    plot_events()
     # Make plot pretty
     plt.title("Depression & Anxiety Over Time")
     plt.xlabel("Time")
@@ -267,14 +278,14 @@ with connection:
     # Baseline Plot
     plt.clf()
     household_pulse = pd.read_csv("./household_pulse_weekly.csv")
-    household_pulse['corrected_week'] = household_pulse['week'] + 18
-    household_pulse['yearweek'] = "2020_" + household_pulse['corrected_week'].astype(str).str.zfill(2)
     household_pulse['date'] = household_pulse['yearweek'].apply(lambda yw: yearweek_to_dates(yw)[1])
     print("\nHousehold Pulse\n",household_pulse)
+
+    #household_pulse = household_pulse[household_pulse['date'] < '2021-01-01'] # Trim household_pulse to 2020
     x = household_pulse['date'].tolist()
     anx_line = plt.plot(x, household_pulse['avg(gad2_sum)'], 'b-', label='Worry and Anxiety (0 is best)')
     dep_line = plt.plot(x, household_pulse['avg(phq2_sum)'], 'r-', label='Disinterest and Depression (0 is best)')
-    dep_line = plt.plot(x, household_pulse['avg(gen_health)'], 'g-', label='General Health (5 is best)')
+    gen_line = plt.plot(x, household_pulse['avg(gen_health)'], 'g-', label='General Health (5 is best)')
     plt.title("Baselines Over Time")
     plt.xlabel("Time")
     plt.ylabel("Feature Score")

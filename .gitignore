@@ -2,4 +2,3 @@ covid_plots/
 county_did_plots/
 __pycache__/
 *.png
-*.csv
