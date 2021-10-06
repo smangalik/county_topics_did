@@ -291,7 +291,7 @@ with connection:
     plt.ylabel("Feature Score")
     plt.gcf().autofmt_xdate()
     plt.legend()
-    dates= list(pd.date_range('2019-01-01','2021-01-01' , freq='1M')-pd.offsets.MonthBegin(1))
+    dates= list(pd.date_range('2020-01-01','2021-12-01' , freq='1M')-pd.offsets.MonthBegin(1))
     plt.xticks(dates)  
     plt.savefig("over_time_health_baselines.png", bbox_inches='tight')
 
