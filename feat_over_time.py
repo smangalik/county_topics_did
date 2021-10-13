@@ -64,7 +64,8 @@ def yearweek_to_dates(yw):
   base = 1 if first.isocalendar()[1] == 1 else 8
   monday = first + datetime.timedelta(days=base - first.isocalendar()[2] + 7 * (week - 1))
   sunday = monday + datetime.timedelta(days=6)
-  return monday, sunday
+  thursday = monday + datetime.timedelta(days=3)
+  return monday, thursday, sunday
 
 def county_list_to_df(county_list):
   # Get all available year weeks in order
@@ -98,7 +99,7 @@ def county_list_to_df(county_list):
   df = pd.DataFrame(columns=columns)
 
   for yw in available_yws:
-      monday, sunday = yearweek_to_dates(yw)
+      monday, thursday, sunday = yearweek_to_dates(yw)
 
       avg_anx = np.mean(yw_anx_score[yw])
       avg_dep = np.mean(yw_dep_score[yw])
@@ -146,9 +147,11 @@ def plot_anxiety(counties_of_interest, counties_name, stderr=True):
     plt.fill_between(x, df['ci_anx_down'].tolist(), df['ci_anx_up'].tolist(), alpha=0.3) # error area
 
 def plot_events():
-  plt.axvline(dt.datetime(2019, 12, 25), color="g", label="Christmas") 
-  plt.axvline(dt.datetime(2020, 5, 25), color="g", label="George Floyd")
-  plt.axvline(dt.datetime(2020, 11, 7), color="g", label="Presidential Election Results") 
+  # plt.axvline(dt.datetime(2019, 12, 25), color="g", label="Christmas") # vertical line
+  ax.axvspan(dt.datetime(2019, 12, 25), dt.datetime(2019, 12, 29), alpha=0.3, color='g', label="Christmas 2019")
+  ax.axvspan(dt.datetime(2020, 1, 21), dt.datetime(2020, 1, 28), alpha=0.3, color='g', label="First US Case COVID")
+  ax.axvspan(dt.datetime(2020, 5, 25), dt.datetime(2020, 5, 30), alpha=0.3, color='g', label="George Floyd")
+  ax.axvspan(dt.datetime(2020, 11, 7), dt.datetime(2020, 11, 14), alpha=0.3, color='g', label="Presidential Election Results")
 
 with connection:
   with connection.cursor(cursors.SSCursor) as cursor:
@@ -194,7 +197,7 @@ with connection:
     
     df = county_list_to_df(county_list)    
 
-    #print(df.head())
+    print(df.head())
 
     # Set up plot
     fig, ax = plt.subplots(1)
@@ -281,7 +284,7 @@ with connection:
     household_pulse['date'] = household_pulse['yearweek'].apply(lambda yw: yearweek_to_dates(yw)[1])
     print("\nHousehold Pulse\n",household_pulse)
 
-    #household_pulse = household_pulse[household_pulse['date'] < '2021-01-01'] # Trim household_pulse to 2020
+    household_pulse = household_pulse[household_pulse['date'] < '2021-01-01'] # Trim household_pulse to 2020
     x = household_pulse['date'].tolist()
     anx_line = plt.plot(x, household_pulse['avg(gad2_sum)'], 'b-', label='Worry and Anxiety (0 is best)')
     dep_line = plt.plot(x, household_pulse['avg(phq2_sum)'], 'r-', label='Disinterest and Depression (0 is best)')
@@ -291,7 +294,7 @@ with connection:
     plt.ylabel("Feature Score")
     plt.gcf().autofmt_xdate()
     plt.legend()
-    dates= list(pd.date_range('2020-01-01','2021-12-01' , freq='1M')-pd.offsets.MonthBegin(1))
+    dates= list(pd.date_range('2019-01-01','2021-01-01' , freq='1M')-pd.offsets.MonthBegin(1))
     plt.xticks(dates)  
     plt.savefig("over_time_health_baselines.png", bbox_inches='tight')
 
