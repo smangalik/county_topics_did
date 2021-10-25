@@ -5,7 +5,7 @@ import numpy as np
 
 def date_to_yearweek(d):
   year, weeknumber, weekday = d.date().isocalendar()
-  return str(year) + "_" + str(weeknumber)
+  return str(year) + "_" + str(weeknumber).zfill(2)
 
 # FIPs to ABBR
 fips_abbr_map = us.states.mapping('fips', 'abbr')

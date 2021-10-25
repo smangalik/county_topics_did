@@ -5,19 +5,31 @@ import pandas as pd
 import numpy as np
 import random
 
-def calculate_splithalfs(county, person_id, score):
-    d_map = {} # d_map[group] = d
-    for group in group_column:
-        #std = standard dev of score in county
-        #half1, half2 = random_cut (permutation -> split in half)
-        #d_map[group] = abs(half1.mean() - half2.mean()) / std
-        pass
-    return d_map 
-
 def splithalfs(x):
     shuffled = random.sample(x, len(x))
     split_index = len(shuffled)//2
     return shuffled[:split_index], shuffled[split_index:]
+
+def permutation_cohens_d(x):
+    ds = []
+    std = np.std(x)
+    for i in range(30):
+        shuffled = random.sample(x, len(x))
+        split_index = len(shuffled)//2
+        a,b = shuffled[:split_index], shuffled[split_index:]
+        d = abs(np.mean(a) - np.mean(b)) / std
+        ds.append(d)
+    avg_d = np.mean(ds)
+    d_stderr = np.std(ds) / np.sqrt(len(ds))
+    return avg_d, d_stderr
+
+def cohens_d(x):
+    shuffled = random.sample(x, len(x))
+    split_index = len(shuffled)//2
+    a,b = shuffled[:split_index], shuffled[split_index:]
+    d = abs(np.mean(a) - np.mean(b)) / np.std(x)
+    return d
+
 
 def main():
 
@@ -38,7 +50,7 @@ def main():
     # tables = ["household_pulse.pulse"]
     # filter = ""
     # feat_val_col = "gad2_sum"
-    # groupby_col = "state_week"
+    # groupby_col = "msa_week"
     # feat_value = "gad2_sum"
     # relevant_columns = ",".join(['WEEK','state','EST_ST','EST_MSA','gad2_sum','phq2_sum'])
     # database = 'household_pulse'
@@ -73,14 +85,20 @@ def main():
     grouped['std'] = [np.array(x).std() for x in grouped[feat_value].values]
     grouped = grouped[grouped[feat_value].str.len() > 1] # list has more than 1 value
 
-    # Shuffle split into halves
-    grouped[["half1","half2"]] = grouped.apply(lambda x: splithalfs(x[feat_value]), axis=1,result_type ='expand') 
-    grouped = grouped.drop([feat_value], axis=1)
-    grouped['mean1'] = [np.array(x).mean() for x in grouped['half1'].values]
-    grouped['mean2'] = [np.array(x).mean() for x in grouped['half2'].values]
-
     # Calculate Cohen's D
-    grouped['d'] = abs(grouped['mean1'] - grouped['mean2']) / grouped['std']
+    grouped['d'] = [cohens_d(x) for x in grouped[feat_value].values]
+    
+    # Calculate Permutation Test of D
+    grouped['d_perm'] = [permutation_cohens_d(x) for x in grouped[feat_value].values]    
+    grouped[["d_perm","d_perm_stderr"]] = grouped.apply(lambda x: permutation_cohens_d(x[feat_value]), axis=1,result_type ='expand') 
+
+    # # Shuffle split into halves
+    # grouped[["half1","half2"]] = grouped.apply(lambda x: splithalfs(x[feat_value]), axis=1,result_type ='expand') 
+    # grouped = grouped.drop([feat_value], axis=1)
+    # grouped['mean1'] = [np.array(x).mean() for x in grouped['half1'].values]
+    # grouped['mean2'] = [np.array(x).mean() for x in grouped['half2'].values]
+    # # Calculate Cohen's D
+    # grouped['d'] = abs(grouped['mean1'] - grouped['mean2']) / grouped['std']
 
     # Filter D Values
     significant = grouped[grouped['d'] < d_threshold]

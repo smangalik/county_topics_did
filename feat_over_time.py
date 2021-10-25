@@ -95,7 +95,7 @@ def county_list_to_df(county_list):
           yw_dep_score[yearweek].append( county_feats[county][yearweek]['DEP_SCORE'] )
 
   # Store results
-  columns = ['date','avg_anx','avg_dep','std_anx','std_dep','n']
+  columns = ['date','yearweek','avg_anx','avg_dep','std_anx','std_dep','n']
   df = pd.DataFrame(columns=columns)
 
   for yw in available_yws:
@@ -107,7 +107,7 @@ def county_list_to_df(county_list):
       std_anx = np.std(yw_anx_score[yw])
       std_dep =  np.std(yw_dep_score[yw]) 
 
-      df2 = pd.DataFrame([[monday, avg_anx, avg_dep, std_anx, std_dep, n]], columns=columns)
+      df2 = pd.DataFrame([[monday, yw, avg_anx, avg_dep, std_anx, std_dep, n]], columns=columns)
       df = df.append(df2, ignore_index = True)
 
   # GROUP BY if necessary
@@ -278,7 +278,7 @@ with connection:
     plt.draw()
     plt.savefig("over_time_n.png", bbox_inches='tight')
 
-    # Baseline Plot
+    # Household Pulse Plot
     plt.clf()
     household_pulse = pd.read_csv("./household_pulse_weekly.csv")
     household_pulse['date'] = household_pulse['yearweek'].apply(lambda yw: yearweek_to_dates(yw)[1])
@@ -297,6 +297,52 @@ with connection:
     dates= list(pd.date_range('2019-01-01','2021-01-01' , freq='1M')-pd.offsets.MonthBegin(1))
     plt.xticks(dates)  
     plt.savefig("over_time_health_baselines.png", bbox_inches='tight')
+
+
+    # Gallup Micro-Poll Plot
+    plt.clf()
+    gallup = pd.read_csv("./gallup_micro_polls_weekly.csv")
+    gallup['date'] = gallup['yearweek'].apply(lambda yw: yearweek_to_dates(yw)[1])
+    print("\nHousehold Pulse\n",gallup)
+
+    x = gallup['date'].tolist()
+    pain_line = plt.plot(x, gallup['avg(wp68_clean)'], label='Experienced Pain? (0 is best)')
+    worry_line = plt.plot(x, gallup['avg(wp69_clean)'], label='Experienced Worry? (0 is best)')
+    stress_line = plt.plot(x, gallup['avg(wp71_clean)'], label='Experienced Stress? (0 is best)')
+    dep_line = plt.plot(x, gallup['avg(H4D_clean)'], label='Depression Diagnosis? (0 is best)')
+    plt.title("Baselines Over Time")
+    plt.xlabel("Time")
+    plt.ylabel("Feature Score")
+    plt.gcf().autofmt_xdate()
+    plt.legend()
+    #dates= list(pd.date_range('2019-01-01','2021-01-01' , freq='1M')-pd.offsets.MonthBegin(1))
+    dates= list(pd.date_range('2018-11-01','2019-08-01' , freq='1M')-pd.offsets.MonthBegin(1))
+    plt.xticks(dates)  
+    plt.savefig("over_time_gallup.png", bbox_inches='tight')
+
+
+    # CDC BRFSS Plot
+    plt.clf()
+    brfss_files = ["/data/smangalik/BRFSS_mental_health_2019.csv","/data/smangalik/BRFSS_mental_health_2020.csv"]
+    brfss = pd.concat((pd.read_csv(f) for f in brfss_files))
+    print("\nCDC BRFSS\n",brfss.head(8))
+    brfss = brfss.rename(columns={"YEARWEEK": "yearweek"})
+    brfss['DATE'] = pd.to_datetime(brfss['DATE'], infer_datetime_format=True) # infer datetime
+    brfss = brfss.groupby(by=["yearweek"]).mean().reset_index() 
+    brfss['DATE'] = brfss['yearweek'].apply(lambda yw: yearweek_to_dates(yw)[1]) # replace date based on yearweek
+    print(brfss.head(8))
+
+    x = brfss['DATE'].tolist()
+    menthlth_line = plt.plot(x, brfss['MENTHLTH'], label='Mentally Unhealthy Days (0 is best)')
+    poorhlth_line = plt.plot(x, brfss['POORHLTH'], label='Health Affected Activities (0 is best)')
+    plt.title("Baselines Over Time")
+    plt.xlabel("Time")
+    plt.ylabel("Days")
+    plt.gcf().autofmt_xdate()
+    plt.legend()
+    dates= list(pd.date_range('2019-01-01','2021-01-01' , freq='1M')-pd.offsets.MonthBegin(1))
+    plt.xticks(dates)  
+    plt.savefig("over_time_brfss.png", bbox_inches='tight')
 
 
     
