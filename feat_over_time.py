@@ -74,7 +74,6 @@ def county_list_to_df(county_list):
       available_yws.extend( list(county_feats[county].keys()) )
   available_yws = list(set(available_yws))
   available_yws.sort()
-  # print("All available year weeks:",available_yws,"\n")
 
   # Get feature scores over time
   # yw_anx_score[yearweek] = [ all anx_scores... ]
@@ -197,7 +196,7 @@ with connection:
     
     df = county_list_to_df(county_list)    
 
-    print(df.head())
+    print(df.head(10),'\n')
 
     # Set up plot
     fig, ax = plt.subplots(1)
@@ -213,7 +212,7 @@ with connection:
     # Events
     plot_events()
     # Make plot pretty
-    plt.title("Depression & Anxiety Over Time")
+    plt.title("National Depression & Anxiety Over Time")
     plt.xlabel("Time")
     plt.ylabel("Feature Score")
     plt.gcf().autofmt_xdate()
@@ -282,7 +281,7 @@ with connection:
     plt.clf()
     household_pulse = pd.read_csv("./household_pulse_weekly.csv")
     household_pulse['date'] = household_pulse['yearweek'].apply(lambda yw: yearweek_to_dates(yw)[1])
-    print("\nHousehold Pulse\n",household_pulse)
+    print("\nHousehold Pulse\n",household_pulse.head(10))
 
     household_pulse = household_pulse[household_pulse['date'] < '2021-01-01'] # Trim household_pulse to 2020
     x = household_pulse['date'].tolist()
@@ -303,7 +302,7 @@ with connection:
     plt.clf()
     gallup = pd.read_csv("./gallup_micro_polls_weekly.csv")
     gallup['date'] = gallup['yearweek'].apply(lambda yw: yearweek_to_dates(yw)[1])
-    print("\nHousehold Pulse\n",gallup)
+    print("\nGallup Micropoll\n",gallup.head(10))
 
     x = gallup['date'].tolist()
     pain_line = plt.plot(x, gallup['avg(wp68_clean)'], label='Experienced Pain? (0 is best)')
@@ -328,6 +327,7 @@ with connection:
     print("\nCDC BRFSS\n",brfss.head(8))
     brfss = brfss.rename(columns={"YEARWEEK": "yearweek"})
     brfss['DATE'] = pd.to_datetime(brfss['DATE'], infer_datetime_format=True) # infer datetime
+    print('\nyearweek counts\n',brfss['yearweek'].value_counts()) # yearweek data point counts
     brfss = brfss.groupby(by=["yearweek"]).mean().reset_index() 
     brfss['DATE'] = brfss['yearweek'].apply(lambda yw: yearweek_to_dates(yw)[1]) # replace date based on yearweek
     print(brfss.head(8))
@@ -343,6 +343,21 @@ with connection:
     dates= list(pd.date_range('2019-01-01','2021-01-01' , freq='1M')-pd.offsets.MonthBegin(1))
     plt.xticks(dates)  
     plt.savefig("over_time_brfss.png", bbox_inches='tight')
+
+    # Show correlations
+    lba_cols = ['yearweek','avg_anx','avg_dep']
+    household_cols = ['yearweek','avg(gen_health)', 'avg(gad2_sum)', 'avg(phq2_sum)']
+    gallup_cols = ['yearweek','avg(wp68_clean)', 'avg(wp69_clean)', 'avg(wp71_clean)', 'avg(H4D_clean)']
+    brfss_cols = ['yearweek','MENTHLTH',  'POORHLTH',  'ACEDEPRS', '_MENT14D']
+
+    corr_df = df[lba_cols].merge(household_pulse[household_cols], on='yearweek')
+    print("\nLBA vs Household Pulse\n", corr_df.corr(method='pearson'))
+
+    corr_df = df[lba_cols].merge(gallup[gallup_cols], on='yearweek')
+    print("\nLBA vs Gallup\n", corr_df.corr(method='pearson'))
+
+    corr_df = df[lba_cols].merge(brfss[brfss_cols], on='yearweek')
+    print("\nLBA vs BRFSS\n", corr_df.corr(method='pearson'))
 
 
     
