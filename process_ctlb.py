@@ -1,5 +1,5 @@
-""" 
-run as `python3 process_ctlb.py` or `python3 process_ctlb.py --not-topics` 
+"""
+run as `python3 process_ctlb.py` or `python3 process_ctlb.py --not-topics`
 """
 
 from pymysql import cursors, connect
@@ -120,7 +120,7 @@ def get_county_factors(cursor, base_year, relevant_counties, normalize=False):
       cursor.execute(sql)
       result = cursor.fetchone()
       factors = np.asarray(result,dtype=np.float32)
-      county_factors[i][2:] = factors     
+      county_factors[i][2:] = factors
 
   non_nan_counties = ~np.isnan(county_factors).any(axis=1)
   print("\nDropping counties with NaNs:",np.asarray(relevant_counties)[~non_nan_counties])
@@ -132,10 +132,10 @@ def get_county_factors(cursor, base_year, relevant_counties, normalize=False):
       county_factors = stats.zscore(county_factors, axis=0)
 
   # Take the PCA of the county factors to calculate neighbors
-  pca = make_pipeline(StandardScaler(), 
+  pca = make_pipeline(StandardScaler(),
                       PCA(n_components=pca_components, random_state=0))
   pca.fit(county_factors)
-  county_factors = pca.transform(county_factors)  
+  county_factors = pca.transform(county_factors)
 
   # Fit the nearest neighbors
   neighbors = NearestNeighbors(n_neighbors=k_neighbors)
@@ -237,14 +237,14 @@ def avg_feat_usage_from_dates(county,dates):
 
   return np.mean(feat_usages, axis=0)
 
-def feat_usage_before_and_after(county, event_start, event_end=None, 
-                                 before_start_window=default_before_start_window, 
+def feat_usage_before_and_after(county, event_start, event_end=None,
+                                 before_start_window=default_before_start_window,
                                  after_start_window=default_after_end_window,
                                  event_buffer=default_event_buffer):
 
   # If no event end specified, end = start
   if event_end == None:
-    event_end = event_start 
+    event_end = event_start
 
   #print('center',date_to_yearweek(event_start))
 
@@ -299,7 +299,7 @@ def plot_diff_in_diff_per_county():
     stderr_match_after = std_match_after / np.sqrt(k_neighbors)
 
     is_significant = abs(intervention_effects[feature_num]) > stderr_match_after*ci_window
-    if not is_significant: 
+    if not is_significant:
       continue # only plot significant results
 
     # List significant changes
@@ -314,7 +314,7 @@ def plot_diff_in_diff_per_county():
     ci_up = [target_before[feature_num]+stderr_match_before, target_expected[feature_num]+stderr_match_after]
     ci_down_2 = [target_before[feature_num]-stderr_match_before*ci_window, target_expected[feature_num]-stderr_match_after*ci_window]
     ci_up_2 = [target_before[feature_num]+stderr_match_before*ci_window, target_expected[feature_num]+stderr_match_after*ci_window]
-    
+
     # Create Plot
     fig, ax = plt.subplots()
     fig.set_size_inches(6, 6)
@@ -341,7 +341,7 @@ def plot_diff_in_diff_per_county():
     plt.xlabel("Time".format(dates_before,dates_after))
     if topics:
       plt.ylabel(str(topic_map[str(feature_num)][:5]) + "\ntopic mentions per 100,000")
-    else: 
+    else:
       plt.ylabel(str(feature_num) + " Usage")
     plt.legend()
     plt.tight_layout()
@@ -364,7 +364,7 @@ with connection:
     #print("\nCounties with the most users in {}".format(base_year),populous_counties[:25],"...")
     populous_counties = sorted(fips_to_population, key=fips_to_population.get, reverse=True)[:top_county_count]
     print("\nCounties with the most users in 2021",populous_counties[:25],"...")
-    
+
 
     # Create county_factor matrix and n-neighbors mdoel
     county_factors, neighbors, populous_counties = get_county_factors(cursor, 2016, populous_counties)
@@ -392,7 +392,7 @@ with connection:
     # Get county feat information
     if topics:
       county_feats_json = "/data/smangalik/county_topics_ctlb.json"
-    else: 
+    else:
       county_feats_json = "/data/smangalik/county_feats_ctlb.json"
     if not os.path.isfile(county_feats_json):
         #table_years = list(range(2012, 2017))
@@ -401,7 +401,7 @@ with connection:
         with open(county_feats_json,"w") as json_file: json.dump(county_feats,json_file)
     start_time = time.time()
     print("Importing produced county features")
-    with open(county_feats_json) as json_file: 
+    with open(county_feats_json) as json_file:
       county_feats = json.load(json_file)
     print("--- %s seconds to import ---" % (time.time() - start_time))
 
@@ -416,7 +416,7 @@ with connection:
       available_yws = list(county_feats['11001'].keys())
       available_yws.sort()
       print("\nAvailable weeks for 11001:",  available_yws)
-    else: 
+    else:
       print("county_feats['11001']['2020_19']['DEP_SCORE'] =",county_feats['11001']['2020_19']['DEP_SCORE'])
       print("county_feats['11001']['2020_20']['ANX_SCORE'] =",county_feats['11001']['2020_20']['ANX_SCORE'])
       available_yws = list(county_feats['11001'].keys())
@@ -488,8 +488,8 @@ with connection:
     else:
       pass
       # TODO needs to be implemented
-      # county_feats[county][year_week][feat] = value    
-    
+      # county_feats[county][year_week][feat] = value
+
 
     # Calculate diff in diffs dict[county] = [feature_array]
     target_befores = {}
@@ -506,13 +506,13 @@ with connection:
       #target_event_start, target_event_end, event_name = first_covid_death.get(target,[None,None,None])
       # First Case of Covid
       target_event_start, target_event_end, event_name = first_covid_case.get(target,[None,None,None])
-      
+
 
       if target_event_start is None and target_event_end is None:
         continue # no event was found for this county
 
       target_before, target_after, dates_before, dates_after = feat_usage_before_and_after(target, event_start=target_event_start, event_end=target_event_end)
-      if target_before is None or target_after is None: 
+      if target_before is None or target_after is None:
         continue # not enough data about this county
 
       #print('dates_before',dates_before)
@@ -534,7 +534,7 @@ with connection:
         # Add all differences, then divide by num of considered counties
         matched_diffs[target].append(matched_diff)
         matched_befores[target].append(matched_before)
-      
+
       if matched_befores[target] == []:
         continue # this target is not viable (no match data)
 
@@ -547,7 +547,7 @@ with connection:
       avg_matched_diff = np.mean(matched_diffs[target], axis=0)
       std_matched_diff = np.std(matched_diffs[target], axis=0)
       avg_matched_diffs[target] = avg_matched_diff
-      
+
 
       # print("\nAverage change in matched counties:", avg_matched_diff)
       # print("std. dev. change in matched counties:", avg_matched_diff)
@@ -609,23 +609,23 @@ with connection:
 
       target_expected = target_before + avg_match_diff  # average of all targets_before + avg_matched_diff [scalar]
       intervention_effect = target_after - target_expected
-      
+
       std_match_before = np.std(all_avg_matched_befores[:,feature_num])
       std_match_after = np.std(all_avg_matched_afters[:,feature_num])
       stderr_match_before = std_match_before / np.sqrt(k_neighbors)
       stderr_match_after = std_match_after / np.sqrt(k_neighbors)
 
       is_significant = abs(intervention_effect) > stderr_match_after*ci_window
-      if not is_significant: 
+      if not is_significant:
         continue # only plot significant results
       increase_decrease = "increased" if intervention_effect > 0 else "decreased"
       stderr_change = intervention_effect/stderr_match_after
       if topics:
         print("Change in {} {} significantly ({} stderrs) -> Topic #{}".format( \
-          topic_map[str(feature_num)][:8], increase_decrease, stderr_change,feature_num)) 
+          topic_map[str(feature_num)][:8], increase_decrease, stderr_change,feature_num))
       else:
         print("Change in {} {} significantly ({} stderrs)".format( \
-          feature_num, increase_decrease, stderr_change)) 
+          feature_num, increase_decrease, stderr_change))
 
       stderr_change_map[stderr_change] = feature_num
 
@@ -634,7 +634,7 @@ with connection:
       ci_up = [target_before+stderr_match_before, target_expected+stderr_match_after]
       ci_down_2 = [target_before-stderr_match_before*ci_window, target_expected-stderr_match_after*ci_window]
       ci_up_2 = [target_before+stderr_match_before*ci_window, target_expected+stderr_match_after*ci_window]
-      
+
       # Create Plot
       x = [2, 6]
       xticks = [1, 3, 5, 7]
@@ -665,11 +665,11 @@ with connection:
       plt.xlabel("Time".format(dates_before,dates_after))
       if topics:
         plt.ylabel(str(topic_map[str(feature_num)][:4]) + " mentions per 100k")
-      else: 
+      else:
         plt.ylabel(str(feature_num) + " Usage")
       plt.legend()
       plt.tight_layout()
-      
+
       if topics:
         plt_name = "did_topic{}_USA_time_before_after_covid_case.png".format( \
           feature_num)
@@ -677,8 +677,8 @@ with connection:
         plt_name = "did_{}_USA_time_before_after_covid_case.png".format( \
           feature_num)
 
-      #plt.savefig(plt_name)
-      #if feature_num > 20: break # TODO remove, used to stop early
+      #plt.savefig(plt_name) # optionally save all figures
+      #if feature_num > 20: break # used to stop early
 
     # Print out the resuls in sorted order
     print("\nSorted Results:")
@@ -689,7 +689,3 @@ with connection:
           topic_map[str(feature)][:6], round(stderr,4), feature))
       else:
         print("{} was {} stderr away".format(feature, stderr))
-
-
-
-      
