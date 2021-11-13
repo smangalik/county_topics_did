@@ -194,7 +194,7 @@ with connection:
     all_counties = county_feats.keys()
     county_list = all_counties
     #county_list = list(set(county_feats.keys() ) & set(ny_counties)) # TODO REMOVE
-    #print("Counties considered:", county_list, "\n")
+    print("Counties considered:", len(county_list), "\n")
 
     df = county_list_to_df(county_list)
 
@@ -339,20 +339,24 @@ with connection:
     fig, ax = plt.subplots(1)
     fig.set_size_inches(18, 8)
     ax2 = ax.twinx()
-    sql = "select fips, yearweek, wp16, wp18, WEA_enjoyF, WEB_worryF, WEC_sadF, WED_stressF, WEE_angerF, WEF_happinessF, WEG_boredomF, WEH_lonelyF, WEI_depressionF, WEJ_anxietyF from gallup_covid_panel_micro_poll.old_hasSadBefAug17_recodedEmoRaceGenPartyAge_v3_02_15;"
+    sql = "select fips as cnty, yearweek, wp16, wp18, WEA_enjoyF, WEB_worryF, WEC_sadF, WED_stressF, WEE_angerF, WEF_happinessF, WEG_boredomF, WEH_lonelyF, WEI_depressionF, WEJ_anxietyF from gallup_covid_panel_micro_poll.old_hasSadBefAug17_recodedEmoRaceGenPartyAge_v3_02_15;"
     gallup = pd.read_sql(sql, connection)
     # TODO do the group by in the sql
     gallup['yearweek'] = gallup['yearweek'].astype(str)
     gallup['yearweek'] = gallup['yearweek'].str[:4] + "_" + gallup['yearweek'].str[4:]
     gallup = gallup.groupby(by=["yearweek"]).mean().reset_index()
     gallup['date'] = gallup['yearweek'].apply(lambda yw: yearweek_to_dates(yw)[1])
+    gallup['neg_affect'] = (gallup['WEB_worryF'] + gallup['WEC_sadF'] + gallup['WED_stressF'] + gallup['WEH_lonelyF']) / 4
+    gallup['pos_affect'] = (gallup['WEA_enjoyF'] + gallup['WEF_happinessF']) / 2
     print("\nGallup COVID Panel\n",gallup.head(10))
 
     x = gallup['date'].tolist()
     sad_line = ax2.plot(x, gallup['WEC_sadF'], label='Sadness')
     worry_line = ax2.plot(x, gallup['WEB_worryF'], label='Worry')
-    anx_line = ax2.plot(x, gallup['WEJ_anxietyF'], label='Anxiety')
-    dep_line = ax2.plot(x, gallup['WEI_depressionF'], label='Depression')
+    #anx_line = ax2.plot(x, gallup['WEJ_anxietyF'], label='Anxiety')
+    #dep_line = ax2.plot(x, gallup['WEI_depressionF'], label='Depression')
+    pos_line = ax2.plot(x, gallup['pos_affect'], label='Pos Affect')
+    neg_line = ax2.plot(x, gallup['neg_affect'], label='Neg Affect')
     plot_events()
     plot_depression(all_counties, "Nationally")
     plot_anxiety(all_counties, "Nationally")
@@ -400,24 +404,30 @@ with connection:
     # Show correlations
     lba_cols = ['yearweek','avg_anx','avg_dep']
     household_cols = ['yearweek','avg(gen_health)', 'avg(gad2_sum)', 'avg(phq2_sum)']
-    gallup_cols = ['yearweek','WEC_sadF', 'WEB_worryF', 'WEJ_anxietyF', 'WEI_depressionF']
+    gallup_cols = ['yearweek','WEC_sadF', 'WEB_worryF', 'pos_affect', 'neg_affect']
     brfss_cols = ['yearweek','MENTHLTH',  'POORHLTH',  'ACEDEPRS', '_MENT14D']
     method="spearman"
 
     plt.clf()
-    corr = df[lba_cols].merge(household_pulse[household_cols], on='yearweek').corr(method=method)
+    merge = df[lba_cols].merge(household_pulse[household_cols], on='yearweek')
+    corr = merge.corr(method=method)
     print("\nLBA vs Household Pulse\n", corr)
+    print(len(merge),"samples used for correlation")
     corr_plot = sns.heatmap(corr, center=0, square=True, linewidths=.5, annot=True)
     corr_plot.figure.savefig("LBA vs Household Pulse.png", bbox_inches='tight')
 
     plt.clf()
-    corr = df[lba_cols].merge(gallup[gallup_cols], on='yearweek').corr(method=method)
+    merge = df[lba_cols].merge(gallup[gallup_cols], on='yearweek')
+    corr = merge.corr(method=method)
     print("\nLBA vs Gallup\n", corr)
+    print(len(merge),"samples used for correlation")
     corr_plot = sns.heatmap(corr, center=0, square=True, linewidths=.5, annot=True)
     corr_plot.figure.savefig("LBA vs Gallup.png", bbox_inches='tight')
 
     plt.clf()
-    corr = df[lba_cols].merge(brfss[brfss_cols], on='yearweek').corr(method=method)
+    merge = df[lba_cols].merge(brfss[brfss_cols], on='yearweek')
+    corr = merge.corr(method=method)
     print("\nLBA vs BRFSS\n", corr)
+    print(len(merge),"samples used for correlation")
     corr_plot = sns.heatmap(corr, center=0, square=True, linewidths=.5, annot=True)
     corr_plot.figure.savefig("LBA vs BRFSS.png", bbox_inches='tight')
