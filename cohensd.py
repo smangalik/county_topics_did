@@ -7,13 +7,9 @@ import random, sys
 
 d_threshold = 0.1
 
-def splithalfs(x):
-    shuffled = random.sample(x, len(x))
-    split_index = len(shuffled)//2
-    return shuffled[:split_index], shuffled[split_index:]
-
 def permutation_cohens_d(x, n_perms=30):
-    if len(x) <= 2: return 1.0, np.std(x)/np.sqrt(len(x))
+    if len(x) <= 2: return 0.0, np.std(x)/np.sqrt(len(x))
+    if np.std(x) == 0: return 0.0, 0.0
     ds = []
     std = np.std(x)
     random.seed(a=25, version=2)
@@ -28,7 +24,8 @@ def permutation_cohens_d(x, n_perms=30):
     return avg_d, d_stderr
 
 def cohens_d(x):
-    if len(x) <= 2: return 1.0
+    if len(x) <= 2: return 0.0
+    if np.std(x) == 0: return 0.0
     random.seed(a=25, version=2)
     shuffled = random.sample(x, len(x))
     split_index = len(shuffled)//2
@@ -44,16 +41,25 @@ def main():
     connection  = connect(read_default_file="~/.my.cnf")
 
     # NOT INDIVIDUAL RESULTS
-    tables = ["ctlb2.feat$dd_depAnxLex$timelines2019$yw_cnty$1gra",
-              "ctlb2.feat$dd_depAnxLex$timelines2020$yw_cnty$1gra"]
-    feat_val_col = "group_norm"
-    groupby_col = "yearweek" # cnty, yearweek
-    feat_value = "DEP_SCORE" # ANX_SCORE, DEP_SCORE
-    filter = "WHERE feat = '{}'".format(feat_value)
-    relevant_columns = "*"
-    database = 'ctlb2'
-    
+    # tables = ["ctlb2.feat$dd_depAnxLex$timelines2019$yw_cnty$1gra",
+    #           "ctlb2.feat$dd_depAnxLex$timelines2020$yw_cnty$1gra"]
+    # feat_val_col = "group_norm"
+    # groupby_col = "yearweek" # cnty, yearweek
+    # feat_value = "DEP_SCORE" # ANX_SCORE, DEP_SCORE
+    # filter = "WHERE feat = '{}'".format(feat_value)
+    # relevant_columns = "*"
+    # database = 'ctlb2'
 
+    # Gallup COVID Panel
+    tables = ["gallup_covid_panel_micro_poll.old_hasSadBefAug17_recodedEmoRaceGenPartyAge_v3_02_15"]
+    feat_val_col = "WEC_sadF" # WEB_worryF, WEC_sadF
+    groupby_col = "yearweek" # cnty, yearweek, yearweek_cnty
+    feat_value = feat_val_col
+    filter = "WHERE {} IS NOT NULL".format(feat_val_col) 
+    relevant_columns = "fips, yearweek, wp16, wp18, WEA_enjoyF, WEB_worryF, WEC_sadF, WED_stressF, WEE_angerF, WEF_happinessF, WEG_boredomF, WEH_lonelyF, WEI_depressionF, WEJ_anxietyF"
+    database = 'gallup_covid_panel_micro_poll'
+    
+    # Census Household Pulse
     # tables = ["household_pulse.pulse"]
     # filter = ""
     # feat_val_col = "gad2_sum"
@@ -63,7 +69,7 @@ def main():
     # database = 'household_pulse'
 
 
-    sql = "SELECT {} FROM {} {}".format( # TODO remove limit
+    sql = "SELECT {} FROM {} {}".format( 
         relevant_columns, tables[0], filter
     )
     df = pd.read_sql(sql, connection)
@@ -83,6 +89,12 @@ def main():
     if database == 'household_pulse':
         df['state_week'] = df['state'] + "_" + df['WEEK'].map(str)
         df['msa_week'] = df['EST_MSA'] + "_" + df['WEEK'].map(str)
+
+    if database == 'gallup_covid_panel_micro_poll':
+        df = df.rename(columns={"fips":"cnty"})
+        df['yearweek'] = df['yearweek'].str[:4] + "_" + df['yearweek'].str[4:]
+        df['yearweek_cnty'] = df['yearweek'] + ":" + df['cnty']
+        
     
     print(df.head(25))
 
@@ -92,22 +104,25 @@ def main():
     # grouped = grouped[grouped[feat_value].str.len() > 2] # list has more than 2 values
 
     # Calculate Cohen's D
-    grouped['d'] = [cohens_d(x) for x in grouped[feat_value].values]
+    grouped['d_sample'] = [cohens_d(x) for x in grouped[feat_value].values]
     
     # Calculate Permutation Test of D
     grouped['d_perm'] = [permutation_cohens_d(x) for x in grouped[feat_value].values]    
     grouped[["d_perm","d_perm_stderr"]] = grouped.apply(lambda x: permutation_cohens_d(x[feat_value]), axis=1,result_type ='expand') 
+    grouped['d_perm+ci'] = grouped['d_perm'] + (grouped['d_perm_stderr'] * 1.96)
 
     # Filter D Values
     #significant = grouped[grouped['d_perm'] < d_threshold]
-    significant = grouped[grouped['d_perm'] + grouped['d_perm_stderr'] * 1.96 < d_threshold]
+    significant_mask = grouped['d_perm+ci'] < d_threshold
+    significant = grouped[significant_mask]
+    insignificant = grouped[~significant_mask]
 
 
     print("\nFor {} and {} we find the following {}/{} groups to have a Permutation Cohen's D less than {}:\n".format(
         feat_value, groupby_col, len(significant), len(grouped), d_threshold))
-    print(significant[[groupby_col]+['d']+['d_perm']+['d_perm_stderr']])
+    print(significant)
 
-    print("\nHere are all our findings:\n",grouped)
+    print("\nHere are the insignificant findings:\n",insignificant)
     
 
 if __name__ == "__main__":
