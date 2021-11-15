@@ -680,8 +680,8 @@ with connection:
         plt_name = "did_{}_USA_time_before_after_covid_case.png".format( \
           feature_num)
 
-      plt.savefig(plt_name) # optionally save all figures
-      if feature_num > 20: break # used to stop early
+      # plt.savefig(plt_name) # optionally save all figures
+      # if feature_num > 20: break # used to stop early
 
     # Print out the resuls in sorted order
     print("\nSorted Results:")

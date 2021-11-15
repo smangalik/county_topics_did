@@ -381,7 +381,8 @@ with connection:
     print("\nCDC BRFSS\n",brfss.head(8))
     brfss = brfss.rename(columns={"YEARWEEK": "yearweek"})
     brfss['DATE'] = pd.to_datetime(brfss['DATE'], infer_datetime_format=True) # infer datetime
-    # print('\nyearweek counts\n',brfss['yearweek'].value_counts()) # yearweek data point counts
+    brfss = brfss[brfss['DATE'] < '2021-01-01'] # Trim brfss to 2020
+    print('\nyearweek counts\n',brfss['yearweek'].value_counts()) # yearweek data point counts
     brfss = brfss.groupby(by=["yearweek"]).mean().reset_index()
     brfss['DATE'] = brfss['yearweek'].apply(lambda yw: yearweek_to_dates(yw)[1]) # replace date based on yearweek
     print(brfss.head(8))
