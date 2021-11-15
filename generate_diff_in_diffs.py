@@ -318,15 +318,15 @@ def plot_diff_in_diff_per_county():
     # Create Plot
     fig, ax = plt.subplots()
     fig.set_size_inches(6, 6)
-    plt.plot(x, [target_before[feature_num], target_after[feature_num]], 'b-', label='Target (Actual)')
+    plt.plot(x, [target_before[feature_num], target_after[feature_num]], 'b-', label='Target (Observed)')
     plt.plot(x, [target_before[feature_num], target_expected[feature_num]],'c--', label='Target (Expected)')
     plt.plot([x[0]]*30, matches_before[:,feature_num], 'r+', alpha=0.2)
     plt.plot([x[1]]*30, matches_after[:,feature_num], 'r+', alpha=0.2)
-    plt.plot(x,[avg_match_before,avg_match_after],'r--',label='Average Match')
+    plt.plot(x,[avg_match_before,avg_match_after],'r--',label='Nearest Match')
     plt.fill_between(x, ci_down, ci_up, color='c', alpha=0.3)
     plt.fill_between(x, ci_down_2, ci_up_2, color='c', alpha=0.2)
     plt.plot([x[1],x[1]], [target_after[feature_num], target_expected[feature_num]], 'k--', \
-      label='Intervention Effect ({})'.format(round(intervention_effects[feature_num],5)))
+      label='Intervention Effect ({}%)'.format(intervention_percent))
     plt.title("County " + str(target) + " before/after " + event_name)
 
     # Format plot
@@ -595,6 +595,7 @@ with connection:
     else:
       list_features = range(num_feats) # TODO fix
 
+    percent_change_map = {}
     stderr_change_map = {}
     for feature_num in list_features: # run against all features
       plt.clf() # reset plot
@@ -609,6 +610,7 @@ with connection:
 
       target_expected = target_before + avg_match_diff  # average of all targets_before + avg_matched_diff [scalar]
       intervention_effect = target_after - target_expected
+      intervention_percent = round(intervention_effect/target_expected * 100.0, 2)
 
       std_match_before = np.std(all_avg_matched_befores[:,feature_num])
       std_match_after = np.std(all_avg_matched_afters[:,feature_num])
@@ -621,13 +623,14 @@ with connection:
       increase_decrease = "increased" if intervention_effect > 0 else "decreased"
       stderr_change = intervention_effect/stderr_match_after
       if topics:
-        print("Change in {} {} significantly ({} stderrs) -> Topic #{}".format( \
-          topic_map[str(feature_num)][:8], increase_decrease, stderr_change,feature_num))
+        print("Change in {} {} by {}% ({} stderrs) -> Topic #{}".format( \
+          topic_map[str(feature_num)][:8], increase_decrease, intervention_percent, stderr_change,feature_num))
       else:
-        print("Change in {} {} significantly ({} stderrs)".format( \
-          feature_num, increase_decrease, stderr_change))
+        print("Change in {} {} by {}% ({} stderrs)".format( \
+          feature_num, increase_decrease, intervention_percent, stderr_change))
 
-      stderr_change_map[stderr_change] = feature_num
+      percent_change_map[intervention_percent] = feature_num
+      stderr_change_map[feature_num] = stderr_change
 
       # Confidence Intervals
       ci_down = [target_before-stderr_match_before, target_expected-stderr_match_after]
@@ -640,15 +643,15 @@ with connection:
       xticks = [1, 3, 5, 7]
       fig, ax = plt.subplots()
       fig.set_size_inches(6, 6)
-      plt.plot(x, [target_before, target_after], 'b-', label='Target (Actual)')
+      plt.plot(x, [target_before, target_after], 'b-', label='Target (Observed)')
       plt.plot(x, [target_before, target_expected],'c--', label='Target (Expected)')
       #plt.plot([x[0]]*30, matches_before[:,feature_num], 'r+', alpha=0.2)
       #plt.plot([x[1]]*30, matches_after[:,feature_num], 'r+', alpha=0.2)
-      plt.plot(x,[avg_match_before,avg_match_after],'r--',label='Average Match')
+      plt.plot(x,[avg_match_before,avg_match_after],'r--',label='Nearest Match')
       plt.fill_between(x, ci_down, ci_up, color='c', alpha=0.3)
       plt.fill_between(x, ci_down_2, ci_up_2, color='c', alpha=0.2)
       plt.plot([x[1],x[1]], [target_after, target_expected], 'k--', \
-        label='Intervention Effect ({})'.format(round(intervention_effect,5)))
+        label='Intervention Effect ({}%)'.format(intervention_percent))
       #plt.axhline(y=avg_county_list_usages[feature_num], color='g', linestyle='-',label='Average Topic Usage')
       #plt.axhline(y=weighted_avg_county_list_usages[feature_num], color='g', linestyle='--',label='Weighted Average Topic Usage')
       plt.title("All US Counties Before/After " + event_name)
@@ -657,10 +660,10 @@ with connection:
       plt.xticks(rotation=45, ha='right')
       ax.set_xticks(xticks)
       ax.set_xticklabels([
-        "{} weeks before event".format(default_event_buffer + default_before_start_window + 1),
-        "{} week before event".format(default_event_buffer),
-        "{} week after event".format(default_event_buffer),
-        "{} weeks after event".format(default_event_buffer + default_after_end_window + 1)
+        "{} weeks before".format(default_event_buffer + default_before_start_window + 1),
+        "{} week before".format(default_event_buffer),
+        "{} week after".format(default_event_buffer),
+        "{} weeks after".format(default_event_buffer + default_after_end_window + 1)
       ])
       plt.xlabel("Time".format(dates_before,dates_after))
       if topics:
@@ -677,15 +680,16 @@ with connection:
         plt_name = "did_{}_USA_time_before_after_covid_case.png".format( \
           feature_num)
 
-      #plt.savefig(plt_name) # optionally save all figures
-      #if feature_num > 20: break # used to stop early
+      plt.savefig(plt_name) # optionally save all figures
+      if feature_num > 20: break # used to stop early
 
     # Print out the resuls in sorted order
     print("\nSorted Results:")
-    for stderr in sorted(stderr_change_map.keys()):
-      feature = stderr_change_map[stderr]
+    for percent_change in sorted(percent_change_map.keys()):
+      feature = percent_change_map[percent_change]
+      stderr = stderr_change_map[feature]
       if topics:
-        print("{} was {} stderr away (Topic #{})".format(
-          topic_map[str(feature)][:6], round(stderr,4), feature))
+        print("{} changed {}% ({} stderr) (Topic #{})".format(
+          topic_map[str(feature)][:6], percent_change , round(stderr,4), feature))
       else:
         print("{} was {} stderr away".format(feature, stderr))
