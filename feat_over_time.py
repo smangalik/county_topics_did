@@ -150,7 +150,8 @@ def plot_events():
   # plt.axvline(dt.datetime(2019, 12, 25), color="g", label="Christmas") # vertical line
   ax.axvspan(dt.datetime(2019, 12, 25), dt.datetime(2019, 12, 29), alpha=0.3, color='g', label="Christmas 2019")
   ax.axvspan(dt.datetime(2020, 1, 21), dt.datetime(2020, 1, 28), alpha=0.3, color='g', label="First US Case COVID")
-  ax.axvspan(dt.datetime(2020, 5, 25), dt.datetime(2020, 5, 30), alpha=0.3, color='g', label="George Floyd")
+  ax.axvspan(dt.datetime(2020, 3, 11), dt.datetime(2020, 3, 19), alpha=0.3, color='g', label="First US COVID Lockdowns")
+  ax.axvspan(dt.datetime(2020, 5, 25), dt.datetime(2020, 5, 30), alpha=0.3, color='g', label="Murder of George Floyd")
   ax.axvspan(dt.datetime(2020, 11, 7), dt.datetime(2020, 11, 14), alpha=0.3, color='g', label="Presidential Election Results")
 
 with connection:
@@ -291,7 +292,10 @@ with connection:
     fig, ax = plt.subplots(1)
     fig.set_size_inches(18, 8)
     ax2 = ax.twinx()
-    household_pulse = pd.read_csv("./household_pulse_weekly.csv")
+    sql = "SELECT week, avg(gen_health), avg(gad2_sum), avg(phq2_sum), std(gen_health), std(gad2_sum), std(phq2_sum), count(gen_health), count(gad2_sum), count(phq2_sum) FROM household_pulse.pulse GROUP BY week ORDER BY week asc;"
+    household_pulse = pd.read_sql(sql, connection)
+    household_pulse_week_mapping = pd.read_csv("./household_pulse_week_mapping.csv") # Add custom yearweeks
+    household_pulse = household_pulse.merge(household_pulse_week_mapping, on='week')
     household_pulse['date'] = household_pulse['yearweek'].apply(lambda yw: yearweek_to_dates(yw)[1])
     print("\nHousehold Pulse\n",household_pulse.head(10))
 
@@ -339,24 +343,24 @@ with connection:
     fig, ax = plt.subplots(1)
     fig.set_size_inches(18, 8)
     ax2 = ax.twinx()
-    sql = "select fips as cnty, yearweek, wp16, wp18, WEA_enjoyF, WEB_worryF, WEC_sadF, WED_stressF, WEE_angerF, WEF_happinessF, WEG_boredomF, WEH_lonelyF, WEI_depressionF, WEJ_anxietyF from gallup_covid_panel_micro_poll.old_hasSadBefAug17_recodedEmoRaceGenPartyAge_v3_02_15;"
+    #ax2 = plt
+    sql = "select fips as cnty, yearweek, WEB_worryF, WEC_sadF, neg_affect_lowArousal, neg_affect_highArousal, neg_affect, pos_affect, affect_balance from gallup_covid_panel_micro_poll.old_hasSadBefAug17_recodedEmoRaceGenPartyAge_v3_02_15;"
     gallup = pd.read_sql(sql, connection)
     # TODO do the group by in the sql
     gallup['yearweek'] = gallup['yearweek'].astype(str)
     gallup['yearweek'] = gallup['yearweek'].str[:4] + "_" + gallup['yearweek'].str[4:]
     gallup = gallup.groupby(by=["yearweek"]).mean().reset_index()
     gallup['date'] = gallup['yearweek'].apply(lambda yw: yearweek_to_dates(yw)[1])
-    gallup['neg_affect'] = (gallup['WEB_worryF'] + gallup['WEC_sadF'] + gallup['WED_stressF'] + gallup['WEH_lonelyF']) / 4
-    gallup['pos_affect'] = (gallup['WEA_enjoyF'] + gallup['WEF_happinessF']) / 2
     print("\nGallup COVID Panel\n",gallup.head(10))
 
     x = gallup['date'].tolist()
     sad_line = ax2.plot(x, gallup['WEC_sadF'], label='Sadness')
     worry_line = ax2.plot(x, gallup['WEB_worryF'], label='Worry')
-    #anx_line = ax2.plot(x, gallup['WEJ_anxietyF'], label='Anxiety')
-    #dep_line = ax2.plot(x, gallup['WEI_depressionF'], label='Depression')
-    pos_line = ax2.plot(x, gallup['pos_affect'], label='Pos Affect')
-    neg_line = ax2.plot(x, gallup['neg_affect'], label='Neg Affect')
+    #pos_line = ax2.plot(x, gallup['pos_affect'], label='Pos Affect')
+    #neg_line = ax2.plot(x, gallup['neg_affect'], label='Neg Affect')
+    #low_neg_line = ax2.plot(x, gallup['neg_affect_lowArousal'], label='Low Arousal Neg Affect') # Depression
+    #high_neg_line = ax2.plot(x, gallup['neg_affect_highArousal'], label='High Arousal Neg Affect') # Anxiety
+    #affect_bal_line = ax2.plot(x, gallup['affect_balance'], label='Affect Balance')
     plot_events()
     plot_depression(all_counties, "Nationally")
     plot_anxiety(all_counties, "Nationally")
@@ -382,7 +386,7 @@ with connection:
     brfss = brfss.rename(columns={"YEARWEEK": "yearweek"})
     brfss['DATE'] = pd.to_datetime(brfss['DATE'], infer_datetime_format=True) # infer datetime
     brfss = brfss[brfss['DATE'] < '2021-01-01'] # Trim brfss to 2020
-    print('\nyearweek counts\n',brfss['yearweek'].value_counts()) # yearweek data point counts
+    #print('\nyearweek counts\n',brfss['yearweek'].value_counts()) # yearweek data point counts
     brfss = brfss.groupby(by=["yearweek"]).mean().reset_index()
     brfss['DATE'] = brfss['yearweek'].apply(lambda yw: yearweek_to_dates(yw)[1]) # replace date based on yearweek
     print(brfss.head(8))
@@ -405,7 +409,7 @@ with connection:
     # Show correlations
     lba_cols = ['yearweek','avg_anx','avg_dep']
     household_cols = ['yearweek','avg(gen_health)', 'avg(gad2_sum)', 'avg(phq2_sum)']
-    gallup_cols = ['yearweek','WEC_sadF', 'WEB_worryF', 'pos_affect', 'neg_affect']
+    gallup_cols = ['yearweek','WEC_sadF', 'WEB_worryF', 'pos_affect', 'neg_affect','neg_affect_lowArousal','neg_affect_highArousal','affect_balance']
     brfss_cols = ['yearweek','MENTHLTH',  'POORHLTH',  'ACEDEPRS', '_MENT14D']
     method="spearman"
 
