@@ -346,16 +346,20 @@ with connection:
     #ax2 = plt
     sql = "select fips as cnty, yearweek, WEB_worryF, WEC_sadF, neg_affect_lowArousal, neg_affect_highArousal, neg_affect, pos_affect, affect_balance from gallup_covid_panel_micro_poll.old_hasSadBefAug17_recodedEmoRaceGenPartyAge_v3_02_15;"
     gallup = pd.read_sql(sql, connection)
-    # TODO do the group by in the sql
+    #gallup = gallup[gallup['cnty'].isin(all_counties)] # filter to only counties in all_counties
     gallup['yearweek'] = gallup['yearweek'].astype(str)
     gallup['yearweek'] = gallup['yearweek'].str[:4] + "_" + gallup['yearweek'].str[4:]
+    gallup_stderr = gallup.groupby(by=["yearweek"]).sem().reset_index()
     gallup = gallup.groupby(by=["yearweek"]).mean().reset_index()
     gallup['date'] = gallup['yearweek'].apply(lambda yw: yearweek_to_dates(yw)[1])
     print("\nGallup COVID Panel\n",gallup.head(10))
 
     x = gallup['date'].tolist()
     sad_line = ax2.plot(x, gallup['WEC_sadF'], label='Sadness')
+    sad_err = ax2.errorbar(x, gallup['WEC_sadF'], gallup_stderr['WEC_sadF'], linestyle='None', label='_nolegend_')
     worry_line = ax2.plot(x, gallup['WEB_worryF'], label='Worry')
+    worry_err = ax2.errorbar(x, gallup['WEB_worryF'], gallup_stderr['WEB_worryF'], linestyle='None', label='_nolegend_')
+
     #pos_line = ax2.plot(x, gallup['pos_affect'], label='Pos Affect')
     #neg_line = ax2.plot(x, gallup['neg_affect'], label='Neg Affect')
     #low_neg_line = ax2.plot(x, gallup['neg_affect_lowArousal'], label='Low Arousal Neg Affect') # Depression
@@ -387,13 +391,19 @@ with connection:
     brfss['DATE'] = pd.to_datetime(brfss['DATE'], infer_datetime_format=True) # infer datetime
     brfss = brfss[brfss['DATE'] < '2021-01-01'] # Trim brfss to 2020
     #print('\nyearweek counts\n',brfss['yearweek'].value_counts()) # yearweek data point counts
-    brfss = brfss.groupby(by=["yearweek"]).mean().reset_index()
+    brfss = brfss.groupby(by=["yearweek"]).agg({'MENTHLTH':['mean','sem'],  'POORHLTH':['mean','sem'],  'ACEDEPRS':['mean','sem'],  '_MENT14D':['mean','sem']}).reset_index()
+    brfss.columns = ['_'.join(col).strip() for col in brfss.columns.values]
+    brfss = brfss.rename(columns={"yearweek_": "yearweek"})
+    #print('\nyearweek stderr\n',brfss.head(8)) # yearweek data point counts
+    #brfss = brfss.groupby(by=["yearweek"]).mean().reset_index()
     brfss['DATE'] = brfss['yearweek'].apply(lambda yw: yearweek_to_dates(yw)[1]) # replace date based on yearweek
     print(brfss.head(8))
 
     x = brfss['DATE'].tolist()
-    menthlth_line = ax2.plot(x, brfss['MENTHLTH'], label='Mentally Unhealthy Days (0 is best)',color='r')
-    poorhlth_line = ax2.plot(x, brfss['POORHLTH'], label='Health Affected Activities (0 is best)',color='g')
+    menthlth_line = ax2.plot(x, brfss['MENTHLTH_mean'], label='Mentally Unhealthy Days (0 is best)', color='r')
+    menthlth_err = ax2.errorbar(x, brfss['MENTHLTH_mean'], brfss['MENTHLTH_sem'], linestyle='None', label='_nolegend_', color='r')
+    poorhlth_line = ax2.plot(x, brfss['POORHLTH_mean'], label='Health Affected Activities (0 is best)',color='g')
+    menthlth_err = ax2.errorbar(x, brfss['POORHLTH_mean'], brfss['POORHLTH_sem'], linestyle='None', label='_nolegend_', color='g')
     plot_events()
     plot_depression(all_counties, "Nationally")
     plot_anxiety(all_counties, "Nationally")
@@ -410,7 +420,7 @@ with connection:
     lba_cols = ['yearweek','avg_anx','avg_dep']
     household_cols = ['yearweek','avg(gen_health)', 'avg(gad2_sum)', 'avg(phq2_sum)']
     gallup_cols = ['yearweek','WEC_sadF', 'WEB_worryF', 'pos_affect', 'neg_affect','neg_affect_lowArousal','neg_affect_highArousal','affect_balance']
-    brfss_cols = ['yearweek','MENTHLTH',  'POORHLTH',  'ACEDEPRS', '_MENT14D']
+    brfss_cols = ['yearweek','MENTHLTH_mean',  'POORHLTH_mean',  'ACEDEPRS_mean', '_MENT14D_mean']
     method="spearman"
 
     plt.clf()
