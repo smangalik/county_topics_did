@@ -28,18 +28,17 @@ connection  = connect(read_default_file="~/.my.cnf")
 county_info = pd.read_csv("county_fips_data.csv",encoding = "utf-8")
 county_info['fips'] = county_info['fips'].astype(str).str.zfill(5)
 
-# Iterate over all time units to create county_feats[county][year_week] = feats
+# Iterate over all time units to create county_feats[county][year_week][DEP_SCORE] = feats
 def get_county_feats(cursor, table_years):
   county_feats = {}
   for table_year in table_years:
     print('Processing {}'.format(table_year))
 
-    sql = "select * from ctlb2.feat$dd_depAnxLex$timelines{}$yw_cnty$1gra;".format(table_year)
+    sql = "select * from ctlb2.feat$dd_depAnxAng$timelines{}$yw_cnty$1gra;".format(table_year)
     cursor.execute(sql)
 
     for result in tqdm(cursor.fetchall_unbuffered()): # Read _unbuffered() to save memory
 
-      # TODO how do we want to process the value_norm?
       yw_county, feat, value, value_norm = result
 
       if feat == '_int': continue
@@ -52,7 +51,7 @@ def get_county_feats(cursor, table_years):
         county_feats[county] = {}
       if county_feats[county].get(yearweek) is None:
         county_feats[county][yearweek] = {}
-      county_feats[county][yearweek][feat] = value
+      county_feats[county][yearweek][feat] = value_norm
 
   return county_feats
 
@@ -124,6 +123,34 @@ def county_list_to_df(county_list):
 
   return df
 
+def county_list_to_full_df(county_list):
+  rows = []
+  for cnty in county_list:
+      for yw in list(county_feats[cnty].keys()): # for each valid yw
+
+        yearweek_cnty = "{}:{}".format(yw,cnty)
+        monday, thursday, sunday = yearweek_to_dates(yw)
+        avg_anx = county_feats[cnty][yw]['ANX_SCORE']
+        avg_dep = county_feats[cnty][yw]['DEP_SCORE']
+
+        row = {
+          "date":monday,
+          'yearweek_cnty':yearweek_cnty,
+          'yearweek':yw,
+          'cnty':cnty,
+          'avg_anx':avg_anx,
+          'avg_dep':avg_dep
+        }
+        rows.append(row)
+
+  df = pd.DataFrame.from_dict(rows)
+
+  # GROUP BY if necessary
+  df.set_index('date', inplace=True)
+  #df = df.groupby(pd.Grouper(freq='Q')).mean() # Q = Quarterly, M = Monthly
+
+  return df
+
 def plot_depression(counties_of_interest, counties_name, stderr=True):
   counties_of_interest = list(set(county_feats.keys() ) & set(counties_of_interest))
   df = county_list_to_df(counties_of_interest)
@@ -185,7 +212,7 @@ with connection:
     d1_counties = county_info.loc[county_info['division'] == 1, 'fips'].tolist() # New England
     d9_counties = county_info.loc[county_info['division'] == 9, 'fips'].tolist() # Pacific
 
-    # TODO Top 5 counties by population
+    # Top 5 counties by population
     top_pop = ['06037','17031','48201','04013','06073'] # LA, Cook, Harris, Maricopa, San Diego
 
     regions = [r1_counties,r2_counties,r3_counties,r4_counties]
@@ -194,12 +221,14 @@ with connection:
 
     all_counties = county_feats.keys()
     county_list = all_counties
-    #county_list = list(set(county_feats.keys() ) & set(ny_counties)) # TODO REMOVE
+    #county_list = list(set(county_feats.keys() ) & set(ny_counties)) # Use to select counties
     print("Counties considered:", len(county_list), "\n")
 
+    # Process Language Based Assessments data
     df = county_list_to_df(county_list)
-
-    print(df.head(10),'\n')
+    print("LBA\n",df.head(10),'\n')
+    full_df = county_list_to_full_df(county_list)
+    print("LBA (full)\n",full_df.head(10),'\n')
 
     # Set up plot
     fig, ax = plt.subplots(1)
@@ -218,8 +247,11 @@ with connection:
     plt.title("National Depression & Anxiety Over Time")
     plt.xlabel("Time")
     plt.ylabel("Feature Score")
+    ax.axes.yaxis.set_ticks([]) # Clean up axes
+    ax.spines['right'].set_visible(False)
+    ax.spines['top'].set_visible(False)
     plt.gcf().autofmt_xdate()
-    plt.legend()
+    #plt.legend()
     dates= list(pd.date_range('2019-01-01','2021-01-01' , freq='1M')-pd.offsets.MonthBegin(1))
     plt.xticks(dates)
     # Plot everything
@@ -232,12 +264,16 @@ with connection:
     #plot_depression(ny_counties, "in New York")
     #for region,region_name in zip(regions,region_names): plot_depression(region, region_name, stderr=False)
     plot_depression(d1_counties, "in New England")
+    #plot_depression(ca_counties, "in California")
     plot_depression(all_counties, "Nationally")
     ax.set_prop_cycle(cycler('color', ['c', 'm', 'y', 'k']) + cycler('lw', [1, 2, 3, 4]))
     # Make plot pretty
     plt.title("Depression Over Time")
     plt.xlabel("Time")
     plt.ylabel("Depression Score")
+    ax.axes.yaxis.set_ticks([]) # Clean up axes
+    ax.spines['right'].set_visible(False)
+    ax.spines['top'].set_visible(False)
     plt.gcf().autofmt_xdate()
     plt.legend()
     dates= list(pd.date_range('2019-01-01','2021-01-01' , freq='1M')-pd.offsets.MonthBegin(1))
@@ -349,14 +385,16 @@ with connection:
     #gallup = gallup[gallup['cnty'].isin(all_counties)] # filter to only counties in all_counties
     gallup['yearweek'] = gallup['yearweek'].astype(str)
     gallup['yearweek'] = gallup['yearweek'].str[:4] + "_" + gallup['yearweek'].str[4:]
+    gallup['yearweek_cnty'] = gallup['yearweek'] + ":" + gallup['cnty']
+    print("\nGallup COVID Panel\n",gallup.head(10))
     gallup_stderr = gallup.groupby(by=["yearweek"]).sem().reset_index()
     gallup = gallup.groupby(by=["yearweek"]).mean().reset_index()
     gallup['date'] = gallup['yearweek'].apply(lambda yw: yearweek_to_dates(yw)[1])
-    print("\nGallup COVID Panel\n",gallup.head(10))
+    print(gallup.head(10),'\n')
 
     x = gallup['date'].tolist()
-    sad_line = ax2.plot(x, gallup['WEC_sadF'], label='Sadness')
-    sad_err = ax2.errorbar(x, gallup['WEC_sadF'], gallup_stderr['WEC_sadF'], linestyle='None', label='_nolegend_')
+    sad_line = ax2.plot(x, gallup['WEC_sadF'], label='Sadness', c="orange")
+    sad_err = ax2.errorbar(x, gallup['WEC_sadF'], gallup_stderr['WEC_sadF'], c="red", linestyle='None', label='_nolegend_')
     worry_line = ax2.plot(x, gallup['WEB_worryF'], label='Worry')
     worry_err = ax2.errorbar(x, gallup['WEB_worryF'], gallup_stderr['WEB_worryF'], linestyle='None', label='_nolegend_')
 
@@ -368,9 +406,10 @@ with connection:
     plot_events()
     plot_depression(all_counties, "Nationally")
     plot_anxiety(all_counties, "Nationally")
-    plt.title("Baselines Over Time")
+    plt.title("Gallup COVID Panel and LBA Over Time")
     plt.xlabel("Time")
     plt.ylabel("Feature Score")
+    ax.axes.yaxis.set_ticks([]) # Clean up axes
     plt.gcf().autofmt_xdate()
     plt.legend()
     dates= list(pd.date_range('2019-01-01','2021-01-01' , freq='1M')-pd.offsets.MonthBegin(1))
@@ -438,6 +477,8 @@ with connection:
     print(len(merge),"samples used for correlation")
     corr_plot = sns.heatmap(corr, center=0, square=True, linewidths=.5, annot=True)
     corr_plot.figure.savefig("LBA vs Gallup.png", bbox_inches='tight')
+
+    # TODO Use LBA full to calculate the Gallup correlations
 
     plt.clf()
     merge = df[lba_cols].merge(brfss[brfss_cols], on='yearweek')
