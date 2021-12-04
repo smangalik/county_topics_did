@@ -52,7 +52,7 @@ def main():
 
     # Gallup COVID Panel
     tables = ["gallup_covid_panel_micro_poll.old_hasSadBefAug17_recodedEmoRaceGenPartyAge_v3_02_15"]
-    feat_val_col = "neg_affect" # WEB_worryF, WEC_sadF, pos_affect, neg_affect
+    feat_val_col = "WEC_sadF" # WEB_worryF, WEC_sadF, pos_affect, neg_affect
     groupby_col = "yearweek_cnty" # cnty, yearweek, yearweek_cnty
     feat_value = feat_val_col
     filter = "WHERE {} IS NOT NULL".format(feat_val_col) 
@@ -63,7 +63,7 @@ def main():
     # tables = ["household_pulse.pulse"]
     # filter = ""
     # feat_val_col = "gad2_sum"
-    # groupby_col = "msa_week" # EST_MSA, state, WEEK, msa_week, state_week
+    # groupby_col = "state_week" # EST_MSA, state, WEEK, msa_week, state_week
     # feat_value = "gad2_sum" # phq2_sum
     # relevant_columns = ",".join(['WEEK','state','EST_ST','EST_MSA','gad2_sum','phq2_sum'])
     # database = 'household_pulse'
@@ -101,7 +101,11 @@ def main():
     grouped = df.groupby(groupby_col)[feat_val_col].apply(list).reset_index(name=feat_value)
     grouped[feat_value] = grouped[feat_value].apply(lambda x: [i for i in x if str(i) != "nan"]) # clean NaNs
     grouped['std'] = [np.array(x).std() for x in grouped[feat_value].values]
-    # grouped = grouped[grouped[feat_value].str.len() > 2] # list has more than 2 values
+    
+
+    min_len = 0
+    grouped['n'] = [len(x) for x in grouped[feat_value].values]  
+    grouped = grouped[grouped['n'] >= min_len] # list has more than 2 values
 
     # Calculate Cohen's D
     grouped['d_sample'] = [cohens_d(x) for x in grouped[feat_value].values]
@@ -110,7 +114,7 @@ def main():
     grouped['d_perm'] = [permutation_cohens_d(x) for x in grouped[feat_value].values]    
     grouped[["d_perm","d_perm_stderr"]] = grouped.apply(lambda x: permutation_cohens_d(x[feat_value]), axis=1,result_type ='expand') 
     grouped['d_perm+ci'] = grouped['d_perm'] + (grouped['d_perm_stderr'] * 1.96)
-    grouped['n'] = [len(x) for x in grouped[feat_value].values]  
+    
 
     # Filter D Values
     #significant = grouped[grouped['d_perm'] < d_threshold]
@@ -121,8 +125,12 @@ def main():
 
     print("\nFor {} and {} we find the following {}/{} groups to have a Permutation Cohen's D less than {}:\n".format(
         feat_value, groupby_col, len(significant), len(grouped), d_threshold))
-    print("Median n = {}, Mean n = {}\n".format( np.median(grouped['n']), round(np.mean(grouped['n'])), 2) )
-    print(significant)
+    print("Median / Mean n = {} / {}".format( np.median(grouped['n']), round(np.mean(grouped['n'])), 2) )
+    print("Average Perm D  = {}; Average Perm D + CI = {}".format( round(np.mean(grouped['d_perm']),4), round(np.mean(grouped['d_perm+ci']),4) )) 
+    print("Std Dev Perm D = {}; Std Dev Perm D + CI = {}".format( np.std(grouped['d_perm']), np.std(grouped['d_perm+ci']) )) 
+    print()
+
+    print("\nHere are the significant findings:\n",significant)
 
     print("\nHere are the insignificant findings:\n",insignificant)
     
