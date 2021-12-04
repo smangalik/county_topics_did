@@ -26,7 +26,7 @@ connection  = connect(read_default_file="~/.my.cnf")
 
 # Get supplemental data
 county_info = pd.read_csv("county_fips_data.csv",encoding = "utf-8")
-county_info['fips'] = county_info['fips'].astype(str).str.zfill(5)
+county_info['cnty'] = county_info['fips'].astype(str).str.zfill(5)
 
 # Iterate over all time units to create county_feats[county][year_week][DEP_SCORE] = feats
 def get_county_feats(cursor, table_years):
@@ -127,16 +127,19 @@ def county_list_to_full_df(county_list):
   rows = []
   for cnty in county_list:
       for yw in list(county_feats[cnty].keys()): # for each valid yw
-
-        yearweek_cnty = "{}:{}".format(yw,cnty)
+        year, week = yw.split("_")
         monday, thursday, sunday = yearweek_to_dates(yw)
+        yearweek_cnty = "{}:{}".format(yw,cnty)
+        year_cnty = "{}:{}".format(year,cnty)
         avg_anx = county_feats[cnty][yw]['ANX_SCORE']
         avg_dep = county_feats[cnty][yw]['DEP_SCORE']
 
         row = {
           "date":monday,
           'yearweek_cnty':yearweek_cnty,
+          'year_cnty':year_cnty,
           'yearweek':yw,
+          'year':year,
           'cnty':cnty,
           'avg_anx':avg_anx,
           'avg_dep':avg_dep
@@ -144,6 +147,8 @@ def county_list_to_full_df(county_list):
         rows.append(row)
 
   df = pd.DataFrame.from_dict(rows)
+  df = pd.merge(df,county_info[['cnty','state_name']],on='cnty')
+  df['yearweek_state'] = df['yearweek'] + ":" + df['state_name']
 
   # GROUP BY if necessary
   df.set_index('date', inplace=True)
@@ -200,17 +205,17 @@ with connection:
     print("Import complete\n")
 
     # Limit county list to one state/region/division at a time
-    ny_counties = county_info.loc[county_info['state_abbr'] == "NY", 'fips'].tolist()
-    al_counties = county_info.loc[county_info['state_abbr'] == "AL", 'fips'].tolist()
-    ca_counties = county_info.loc[county_info['state_abbr'] == "CA", 'fips'].tolist()
-    tx_counties = county_info.loc[county_info['state_abbr'] == "TX", 'fips'].tolist()
-    oh_counties = county_info.loc[county_info['state_abbr'] == "OH", 'fips'].tolist()
-    r1_counties = county_info.loc[county_info['region'] == 1, 'fips'].tolist() # North East
-    r2_counties = county_info.loc[county_info['region'] == 2, 'fips'].tolist() # Midwest
-    r3_counties = county_info.loc[county_info['region'] == 3, 'fips'].tolist() # South
-    r4_counties = county_info.loc[county_info['region'] == 4, 'fips'].tolist() # West
-    d1_counties = county_info.loc[county_info['division'] == 1, 'fips'].tolist() # New England
-    d9_counties = county_info.loc[county_info['division'] == 9, 'fips'].tolist() # Pacific
+    ny_counties = county_info.loc[county_info['state_abbr'] == "NY", 'cnty'].tolist()
+    al_counties = county_info.loc[county_info['state_abbr'] == "AL", 'cnty'].tolist()
+    ca_counties = county_info.loc[county_info['state_abbr'] == "CA", 'cnty'].tolist()
+    tx_counties = county_info.loc[county_info['state_abbr'] == "TX", 'cnty'].tolist()
+    oh_counties = county_info.loc[county_info['state_abbr'] == "OH", 'cnty'].tolist()
+    r1_counties = county_info.loc[county_info['region'] == 1, 'cnty'].tolist() # North East
+    r2_counties = county_info.loc[county_info['region'] == 2, 'cnty'].tolist() # Midwest
+    r3_counties = county_info.loc[county_info['region'] == 3, 'cnty'].tolist() # South
+    r4_counties = county_info.loc[county_info['region'] == 4, 'cnty'].tolist() # West
+    d1_counties = county_info.loc[county_info['division'] == 1, 'cnty'].tolist() # New England
+    d9_counties = county_info.loc[county_info['division'] == 9, 'cnty'].tolist() # Pacific
 
     # Top 5 counties by population
     top_pop = ['06037','17031','48201','04013','06073'] # LA, Cook, Harris, Maricopa, San Diego
@@ -227,8 +232,8 @@ with connection:
     # Process Language Based Assessments data
     df = county_list_to_df(county_list)
     print("LBA\n",df.head(10),'\n')
-    full_df = county_list_to_full_df(county_list)
-    print("LBA (full)\n",full_df.head(10),'\n')
+    df_full = county_list_to_full_df(county_list)
+    print("LBA (full)\n",df_full.head(10),'\n')
 
     # Set up plot
     fig, ax = plt.subplots(1)
@@ -381,14 +386,16 @@ with connection:
     ax2 = ax.twinx()
     #ax2 = plt
     sql = "select fips as cnty, yearweek, WEB_worryF, WEC_sadF, neg_affect_lowArousal, neg_affect_highArousal, neg_affect, pos_affect, affect_balance from gallup_covid_panel_micro_poll.old_hasSadBefAug17_recodedEmoRaceGenPartyAge_v3_02_15;"
-    gallup = pd.read_sql(sql, connection)
+    gallup_full = pd.read_sql(sql, connection)
     #gallup = gallup[gallup['cnty'].isin(all_counties)] # filter to only counties in all_counties
-    gallup['yearweek'] = gallup['yearweek'].astype(str)
-    gallup['yearweek'] = gallup['yearweek'].str[:4] + "_" + gallup['yearweek'].str[4:]
-    gallup['yearweek_cnty'] = gallup['yearweek'] + ":" + gallup['cnty']
-    print("\nGallup COVID Panel\n",gallup.head(10))
-    gallup_stderr = gallup.groupby(by=["yearweek"]).sem().reset_index()
-    gallup = gallup.groupby(by=["yearweek"]).mean().reset_index()
+    gallup_full['yearweek'] = gallup_full['yearweek'].astype(str)
+    gallup_full['yearweek'] = gallup_full['yearweek'].str[:4] + "_" + gallup_full['yearweek'].str[4:]
+    gallup_full['yearweek_cnty'] = gallup_full['yearweek'] + ":" + gallup_full['cnty']
+    gallup_full = pd.merge(gallup_full,county_info[['cnty','state_name']],on='cnty')
+    gallup_full['yearweek_state'] = gallup_full['yearweek'] + ":" + gallup_full['state_name']
+    print("\nGallup COVID Panel\n",gallup_full.head(10))
+    gallup_stderr = gallup_full.groupby(by=["yearweek"]).sem().reset_index()
+    gallup = gallup_full.groupby(by=["yearweek"]).mean().reset_index()
     gallup['date'] = gallup['yearweek'].apply(lambda yw: yearweek_to_dates(yw)[1])
     print(gallup.head(10),'\n')
 
@@ -456,14 +463,14 @@ with connection:
     plt.savefig("over_time_brfss.png", bbox_inches='tight')
 
     # Show correlations
-    lba_cols = ['yearweek','avg_anx','avg_dep']
-    household_cols = ['yearweek','avg(gen_health)', 'avg(gad2_sum)', 'avg(phq2_sum)']
-    gallup_cols = ['yearweek','WEC_sadF', 'WEB_worryF', 'pos_affect', 'neg_affect','neg_affect_lowArousal','neg_affect_highArousal','affect_balance']
-    brfss_cols = ['yearweek','MENTHLTH_mean',  'POORHLTH_mean',  'ACEDEPRS_mean', '_MENT14D_mean']
-    method="spearman"
+    lba_cols = ['avg_anx','avg_dep']
+    household_cols = ['avg(gen_health)', 'avg(gad2_sum)', 'avg(phq2_sum)']
+    gallup_cols = ['WEC_sadF', 'WEB_worryF', 'pos_affect', 'neg_affect','neg_affect_lowArousal','neg_affect_highArousal','affect_balance']
+    brfss_cols = ['MENTHLTH_mean',  'POORHLTH_mean',  'ACEDEPRS_mean', '_MENT14D_mean']
+    method="pearson"
 
     plt.clf()
-    merge = df[lba_cols].merge(household_pulse[household_cols], on='yearweek')
+    merge = df[lba_cols+['yearweek']].merge(household_pulse[household_cols+['yearweek']], on='yearweek') # national x week
     corr = merge.corr(method=method)
     print("\nLBA vs Household Pulse\n", corr)
     print(len(merge),"samples used for correlation")
@@ -471,9 +478,10 @@ with connection:
     corr_plot.figure.savefig("LBA vs Household Pulse.png", bbox_inches='tight')
 
     plt.clf()
-    merge = df[lba_cols].merge(gallup[gallup_cols], on='yearweek')
+    group_on = 'yearweek' # yearweek = week x national, yearweek_cnty = week x county, yearweek_state = week x state, cnty = year x county
+    merge = df_full.groupby(group_on).mean().reset_index()[lba_cols+[group_on]].merge(gallup_full.groupby(group_on).mean().reset_index()[gallup_cols+[group_on]], on=group_on)
     corr = merge.corr(method=method)
-    print("\nLBA vs Gallup\n", corr)
+    print("\nLBA vs Gallup COVID by",group_on,'\n', corr)
     print(len(merge),"samples used for correlation")
     corr_plot = sns.heatmap(corr, center=0, square=True, linewidths=.5, annot=True)
     corr_plot.figure.savefig("LBA vs Gallup.png", bbox_inches='tight')
@@ -481,7 +489,7 @@ with connection:
     # TODO Use LBA full to calculate the Gallup correlations
 
     plt.clf()
-    merge = df[lba_cols].merge(brfss[brfss_cols], on='yearweek')
+    merge = df[lba_cols+['yearweek']].merge(brfss[brfss_cols+['yearweek']], on='yearweek')
     corr = merge.corr(method=method)
     print("\nLBA vs BRFSS\n", corr)
     print(len(merge),"samples used for correlation")
