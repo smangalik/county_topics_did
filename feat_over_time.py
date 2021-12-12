@@ -6,17 +6,20 @@ import os, time, json, datetime, sys
 
 from cycler import cycler
 
+from pymysql import cursors, connect
+from tqdm import tqdm
+
 import datetime as dt
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
+import statsmodels.formula.api as smf
+import statsmodels as sm
+
+from utils import yearweek_to_dates
 
 from pandas.plotting import register_matplotlib_converters
-
-
-from pymysql import cursors, connect
-from tqdm import tqdm
 
 register_matplotlib_converters()
 
@@ -54,18 +57,6 @@ def get_county_feats(cursor, table_years):
       county_feats[county][yearweek][feat] = value_norm
 
   return county_feats
-
-# Returns the first and last day of a week given as "2020_11"
-def yearweek_to_dates(yw):
-  year, week = yw.split("_")
-  year, week = int(year), int(week)
-
-  first = datetime.datetime(year, 1, 1)
-  base = 1 if first.isocalendar()[1] == 1 else 8
-  monday = first + datetime.timedelta(days=base - first.isocalendar()[2] + 7 * (week - 1))
-  sunday = monday + datetime.timedelta(days=6)
-  thursday = monday + datetime.timedelta(days=3)
-  return monday, thursday, sunday
 
 def county_list_to_df(county_list):
   # Get all available year weeks in order
@@ -151,7 +142,7 @@ def county_list_to_full_df(county_list):
   df['yearweek_state'] = df['yearweek'] + ":" + df['state_name']
 
   # GROUP BY if necessary
-  df.set_index('date', inplace=True)
+  #df.set_index('date', inplace=True)
   #df = df.groupby(pd.Grouper(freq='Q')).mean() # Q = Quarterly, M = Monthly
 
   return df
@@ -232,8 +223,8 @@ with connection:
     # Process Language Based Assessments data
     df = county_list_to_df(county_list)
     print("LBA\n",df.head(10),'\n')
-    df_full = county_list_to_full_df(county_list)
-    print("LBA (full)\n",df_full.head(10),'\n')
+    lba_full = county_list_to_full_df(county_list)
+    print("LBA (full)\n",lba_full.head(10),'\n')
 
     # Set up plot
     fig, ax = plt.subplots(1)
@@ -393,11 +384,10 @@ with connection:
     gallup_full['yearweek_cnty'] = gallup_full['yearweek'] + ":" + gallup_full['cnty']
     gallup_full = pd.merge(gallup_full,county_info[['cnty','state_name']],on='cnty')
     gallup_full['yearweek_state'] = gallup_full['yearweek'] + ":" + gallup_full['state_name']
-    print("\nGallup COVID Panel\n",gallup_full.head(10))
+    print("\nGallup COVID Panel (Full)\n",gallup_full.head(10))
     gallup_stderr = gallup_full.groupby(by=["yearweek"]).sem().reset_index()
-    gallup = gallup_full.groupby(by=["yearweek"]).mean().reset_index()
+    gallup = gallup_full.groupby(by=["yearweek"]).mean().reset_index() # Used for plotting by yearweek
     gallup['date'] = gallup['yearweek'].apply(lambda yw: yearweek_to_dates(yw)[1])
-    print(gallup.head(10),'\n')
 
     x = gallup['date'].tolist()
     sad_line = ax2.plot(x, gallup['WEC_sadF'], label='Sadness', c="orange")
@@ -423,6 +413,21 @@ with connection:
     #dates= list(pd.date_range('2020-03-01','2020-09-01' , freq='1M')-pd.offsets.MonthBegin(1))
     plt.xticks(dates)
     plt.savefig("over_time_gallup_covid.png", bbox_inches='tight')
+
+
+    # TODO Calculate Fixed Effects
+
+    gallup_cols = ['WEC_sadF', 'WEB_worryF'] + ['yearweek_cnty']
+    print("\nMixed Linear Model (Fixed Effects)")
+    data = gallup_full[gallup_cols].merge(lba_full, on='yearweek_cnty')
+    print("data county counts",data['cnty'].value_counts())
+    print(data.head(3))
+    mdf = smf.mixedlm(formula="WEC_sadF ~ avg_dep", data=data, groups=data["cnty"]).fit()
+    #mdf = sm.regression.mixed_linear_model.MixedLM(endog=data['avg_dep'], exog=data[['WEC_sadF', 'WEB_worryF']], groups=data['cnty']).fit()
+    print('\n',mdf.summary())
+    # TODO REMOVE
+    print("CLOSING EARLY")
+    sys.exit()
 
 
     # CDC BRFSS Plot
@@ -479,14 +484,12 @@ with connection:
 
     plt.clf()
     group_on = 'yearweek' # yearweek = week x national, yearweek_cnty = week x county, yearweek_state = week x state, cnty = year x county
-    merge = df_full.groupby(group_on).mean().reset_index()[lba_cols+[group_on]].merge(gallup_full.groupby(group_on).mean().reset_index()[gallup_cols+[group_on]], on=group_on)
+    merge = lba_full.groupby(group_on).mean().reset_index()[lba_cols+[group_on]].merge(gallup_full.groupby(group_on).mean().reset_index()[gallup_cols+[group_on]], on=group_on)
     corr = merge.corr(method=method)
     print("\nLBA vs Gallup COVID by",group_on,'\n', corr)
     print(len(merge),"samples used for correlation")
     corr_plot = sns.heatmap(corr, center=0, square=True, linewidths=.5, annot=True)
     corr_plot.figure.savefig("LBA vs Gallup.png", bbox_inches='tight')
-
-    # TODO Use LBA full to calculate the Gallup correlations
 
     plt.clf()
     merge = df[lba_cols+['yearweek']].merge(brfss[brfss_cols+['yearweek']], on='yearweek')
