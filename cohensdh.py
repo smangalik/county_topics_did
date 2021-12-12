@@ -7,7 +7,7 @@ import random, sys
 import scipy.stats as ss
 from utils import yearweek_to_dates, date_to_quarter
 
-d_threshold = 0.1
+sig_threshold = 0.1
 
 def permutation_cohens_d(x, n_perms=30):
     if len(x) <= 2: return np.nan, np.nan
@@ -27,13 +27,40 @@ def permutation_cohens_d(x, n_perms=30):
 
 def cohens_d(x):
     if len(x) <= 2: return np.nan
-    if np.std(x) < 1e-6: return np.nan, np.nan 
+    if np.std(x) < 1e-6: return np.nan
     random.seed(a=25, version=2)
     shuffled = random.sample(x, len(x))
     split_index = len(shuffled)//2
     a,b = shuffled[:split_index], shuffled[split_index:]
     d = abs(np.mean(a) - np.mean(b)) / np.std(x)
     return d
+
+def permutation_cohens_h(x, n_perms=30):
+    if len(x) <= 2: return np.nan, np.nan
+    hs = []
+    random.seed(a=25, version=2)
+    for i in range(n_perms):
+        shuffled = random.sample(x, len(x))
+        split_index = len(shuffled)//2
+        a,b = shuffled[:split_index], shuffled[split_index:]
+        p1 = sum(a)/len(a)
+        p2 = sum(b)/len(b)
+        h = abs(2 * (np.arcsin(np.sqrt(p1))- np.arcsin(np.sqrt(p2))))
+        hs.append(h)
+    avg_h = np.mean(hs)
+    h_stderr = np.std(hs) / np.sqrt(len(hs))   
+    return avg_h, h_stderr
+
+def cohens_h(x):
+    if len(x) <= 2: return np.nan
+    random.seed(a=25, version=2)
+    shuffled = random.sample(x, len(x))
+    split_index = len(shuffled)//2
+    a,b = shuffled[:split_index], shuffled[split_index:]
+    p1 = sum(a)/len(a)
+    p2 = sum(b)/len(b)
+    h = abs(2 * (np.arcsin(np.sqrt(p1))- np.arcsin(np.sqrt(p2))))
+    return h
 
 
 def main():
@@ -58,7 +85,7 @@ def main():
     # NOT INDIVIDUAL RESULTS
     # tables = ["ctlb2.feat$dd_depAnxLex$timelines2019$yw_cnty$1gra",
     #           "ctlb2.feat$dd_depAnxLex$timelines2020$yw_cnty$1gra"]
-    # feat_val_col = "group_norm"
+    # feat_val_col = "group_norm"5
     # groupby_col = "yearweek" # cnty, yearweek
     # feat_value = "DEP_SCORE" # ANX_SCORE, DEP_SCORE
     # filter = "WHERE feat = '{}'".format(feat_value)
@@ -68,7 +95,7 @@ def main():
     # Gallup COVID Panel
     tables = ["gallup_covid_panel_micro_poll.old_hasSadBefAug17_recodedEmoRaceGenPartyAge_v3_02_15"]
     feat_val_col = "WEC_sadF" # WEB_worryF, WEC_sadF, pos_affect, neg_affect
-    groupby_col = "quarter_division" # cnty, yearweek, yearweek_cnty, division_name, yearweek_msa, month_msa, month_state, quarter_state, quarter_division
+    groupby_col = "yearweek" # cnty, yearweek, yearweek_cnty, division_name, yearweek_msa, month_msa, month_state, quarter_state, quarter_division
     feat_value = feat_val_col
     filter = "WHERE {} IS NOT NULL".format(feat_val_col) 
     relevant_columns = "fips, yearweek, WEA_enjoyF, WEB_worryF, WEC_sadF, WEI_depressionF, WEJ_anxietyF, pos_affect, neg_affect"
@@ -136,29 +163,42 @@ def main():
 
     # Calculate Cohen's D
     grouped['d_sample'] = [cohens_d(x) for x in grouped[feat_value].values]
+    grouped['h_sample'] = [cohens_h(x) for x in grouped[feat_value].values]
     
     # Calculate Permutation Test of D
-    grouped['d_perm'] = [permutation_cohens_d(x) for x in grouped[feat_value].values]    
-    grouped[["d_perm","d_perm_stderr"]] = grouped.apply(lambda x: permutation_cohens_d(x[feat_value]), axis=1,result_type ='expand') 
+    grouped[["d_perm","d_perm_stderr"]] = grouped.apply(lambda x: permutation_cohens_d(x[feat_value]), axis=1,result_type ='expand')
+    grouped[["h_perm","h_perm_stderr"]] = grouped.apply(lambda x: permutation_cohens_h(x[feat_value]), axis=1,result_type ='expand')  
     grouped['d_perm+ci'] = grouped['d_perm'] + (grouped['d_perm_stderr'] * 1.96)
+    grouped['h_perm+ci'] = grouped['h_perm'] + (grouped['h_perm_stderr'] * 1.96)
     
 
     # Filter D Values
-    significant_mask = grouped['d_perm+ci'] < d_threshold
+    if database == 'gallup_covid_panel_micro_poll':
+        significant_mask = grouped['h_perm+ci'] < sig_threshold
+    else:
+        significant_mask = grouped['d_perm+ci'] < sig_threshold
     significant = grouped[significant_mask]
     insignificant = grouped[~significant_mask]
 
-
-    print("\nFor {} and {} we find the following {}/{} groups to have a Permutation Cohen's D less than {}:\n".format(
-        feat_value, groupby_col, len(significant), len(grouped), d_threshold))
-    print("Overall Median / Mean n = {} / {}".format( np.median(grouped['n']), round(np.mean(grouped['n'])), 2) )
-    print("Average Perm D  = {}; Average Perm D + CI = {}".format( round(np.mean(grouped['d_perm']),4), round(np.mean(grouped['d_perm+ci']),4) )) 
-    print("Std Dev Perm D = {}; Std Dev Perm D + CI = {}".format( np.std(grouped['d_perm']), np.std(grouped['d_perm+ci']) )) 
+    # Print out results
+    if database == 'gallup_covid_panel_micro_poll':
+        print("\nFor {} and {} we find the following {}/{} groups to have a Permutation Cohen's H less than {}:\n".format(
+        feat_value, groupby_col, len(significant), len(grouped), sig_threshold))
+    else:
+        print("\nFor {} and {} we find the following {}/{} groups to have a Permutation Cohen's D less than {}:\n".format(
+        feat_value, groupby_col, len(significant), len(grouped), sig_threshold))
+    
+    
+    print("Average Perm D  = {}; Average Perm D + CI = {}".format( round(np.mean(grouped['d_perm']),4), round(np.mean(grouped['d_perm+ci']),4) ))
+    print("Average Perm H  = {}; Average Perm H + CI = {}".format( round(np.mean(grouped['h_perm']),4), round(np.mean(grouped['h_perm+ci']),4) ))
+    print("Overall Median / Mean n = {} / {}".format( np.median(grouped['n']), round(np.mean(grouped['n'])), 2) ) 
+    #print("Std Dev Perm D = {}; Std Dev Perm D + CI = {}".format( np.std(grouped['d_perm']), np.std(grouped['d_perm+ci']) )) 
     print()
 
-    print("\nHere are the significant findings:\n",significant)
+    ignore_cols = ['d_perm_stderr','h_perm_stderr']
+    print("\nHere are the significant findings:\n", significant.drop(ignore_cols, axis=1))
 
-    print("\nHere are the insignificant findings:\n",insignificant)
+    print("\nHere are the insignificant findings:\n", insignificant.drop(ignore_cols, axis=1))
     
 
 if __name__ == "__main__":
