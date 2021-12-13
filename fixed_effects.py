@@ -91,7 +91,7 @@ def county_list_to_full_df(county_list):
         rows.append(row)
 
   df = pd.DataFrame.from_dict(rows)
-  df = pd.merge(df,county_info[['cnty','state_name']],on='cnty')
+  df = pd.merge(df,county_info[['cnty','state_name','region_name']],on='cnty')
   df['yearweek_state'] = df['yearweek'] + ":" + df['state_name']
 
   # GROUP BY if necessary
@@ -154,18 +154,20 @@ with connection:
     print('\n',mdf.summary())
 
     # TODO De-Mean Data
+    demean = False
     Y = "WEC_sadF" # WEB_worryF
     T = "avg_dep" # avg_anx
-    X = [T] # state_name, year, yearweek, month
+    X = [T,"C(region_name)"] # state_name, region_name, year, yearweek, month, use C(dummy_var) to create dummy vars
     entity = "cnty"
 
-    mean_data = data.groupby(entity)[X+[Y]].mean()
-
-    demeaned_data = (data
-               .set_index(entity) # set the index as the entity indicator
-               [X+[Y]]
-               - mean_data) # subtract the mean data
+    if demean: # does not support dummy vars
+      mean_data = data.groupby(entity)[X+[Y]].mean()
+      data = (data
+                .set_index(entity) # set the index as the entity indicator
+                [X+[Y]]
+                - mean_data) # subtract the mean data
 
     # Run OLS Model
-    mod = smf.ols("{} ~ {}".format(Y, '+'.join(X)), data=demeaned_data).fit()
-    print('\t\t\tDe-Meaned OLS\n',mod.summary().tables[1])
+    mod = smf.ols("{} ~ {}".format(Y, '+'.join(X)), data=data).fit()
+    print('\t\t\tDe-Meaned OLS\n')
+    print(mod.summary().tables[1])
