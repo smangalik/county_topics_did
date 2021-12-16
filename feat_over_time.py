@@ -37,12 +37,14 @@ def get_county_feats(cursor, table_years):
   for table_year in table_years:
     print('Processing {}'.format(table_year))
 
-    sql = "select * from ctlb2.feat$dd_depAnxAng$timelines{}$yw_cnty$1gra;".format(table_year)
+    # sql = "select * from ctlb2.feat$dd_depAnxAng$timelines{}$yw_cnty$1gra;".format(table_year) # unweighted
+    sql = "select * from ctlb2.feat$dd_depAnxAng_rw$timelines{}$3upt3_user$yw_cnty$1gra;".format(table_year) # reweighted
+    
     cursor.execute(sql)
 
     for result in tqdm(cursor.fetchall_unbuffered()): # Read _unbuffered() to save memory
 
-      yw_county, feat, value, value_norm = result
+      yw_county, feat, value, value_norm = result[0], result[1], result[2], result[3]
 
       if feat == '_int': continue
       yearweek, county = yw_county.split(":")
@@ -170,12 +172,18 @@ def plot_anxiety(counties_of_interest, counties_name, stderr=True):
     ax.fill_between(x, df['ci_anx_down'].tolist(), df['ci_anx_up'].tolist(), alpha=0.3) # error area
 
 def plot_events():
-  # plt.axvline(dt.datetime(2019, 12, 25), color="g", label="Christmas") # vertical line
-  ax.axvspan(dt.datetime(2019, 12, 25), dt.datetime(2019, 12, 29), alpha=0.3, color='g', label="Christmas 2019")
-  ax.axvspan(dt.datetime(2020, 1, 21), dt.datetime(2020, 1, 28), alpha=0.3, color='g', label="First US Case COVID")
-  ax.axvspan(dt.datetime(2020, 3, 11), dt.datetime(2020, 3, 19), alpha=0.3, color='g', label="First US COVID Lockdowns")
-  ax.axvspan(dt.datetime(2020, 5, 25), dt.datetime(2020, 5, 30), alpha=0.3, color='g', label="Murder of George Floyd")
-  ax.axvspan(dt.datetime(2020, 11, 7), dt.datetime(2020, 11, 14), alpha=0.3, color='g', label="Presidential Election Results")
+  events_dict = {}
+  events_dict["Christmas 2019"] = [dt.datetime(2019, 12, 25), dt.datetime(2019, 12, 29)]
+  events_dict["First US Case COVID"] = [dt.datetime(2020, 1, 21), dt.datetime(2020, 1, 28)]
+  events_dict["First US COVID Lockdowns"] = [dt.datetime(2020, 3, 11), dt.datetime(2020, 3, 19)]
+  events_dict["Murder of George Floyd"] = [dt.datetime(2020, 5, 25), dt.datetime(2020, 5, 30)]
+  events_dict["Presidential Election Results"] = [dt.datetime(2020, 11, 7), dt.datetime(2020, 11, 14)]
+  #events_dict["Texas Shootings"] = [dt.datetime(2019, 8, 3), dt.datetime(2019, 8, 31)]
+  bottom, top = ax.get_ylim()
+  for event_name, dates in events_dict.items():
+    ax.axvspan(dates[0], dates[1], alpha=0.3, color='g', label='_nolegend_') # Plot line
+    plt.text(dates[0], bottom, s="{}  ".format(event_name), rotation=270, verticalalignment='bottom') # Line text
+  
 
 with connection:
   with connection.cursor(cursors.SSCursor) as cursor:
@@ -243,11 +251,11 @@ with connection:
     plt.title("National Depression & Anxiety Over Time")
     plt.xlabel("Time")
     plt.ylabel("Feature Score")
-    ax.axes.yaxis.set_ticks([]) # Clean up axes
+    #ax.axes.yaxis.set_ticks([]) # Clean up axes
     ax.spines['right'].set_visible(False)
     ax.spines['top'].set_visible(False)
     plt.gcf().autofmt_xdate()
-    #plt.legend()
+    plt.legend()
     dates= list(pd.date_range('2019-01-01','2021-01-01' , freq='1M')-pd.offsets.MonthBegin(1))
     plt.xticks(dates)
     # Plot everything
@@ -259,15 +267,16 @@ with connection:
     fig.set_size_inches(18, 8)
     #plot_depression(ny_counties, "in New York")
     #for region,region_name in zip(regions,region_names): plot_depression(region, region_name, stderr=False)
-    plot_depression(d1_counties, "in New England")
+    #plot_depression(d1_counties, "in New England")
     #plot_depression(ca_counties, "in California")
     plot_depression(all_counties, "Nationally")
+    plot_events()
     ax.set_prop_cycle(cycler('color', ['c', 'm', 'y', 'k']) + cycler('lw', [1, 2, 3, 4]))
     # Make plot pretty
     plt.title("Depression Over Time")
     plt.xlabel("Time")
     plt.ylabel("Depression Score")
-    ax.axes.yaxis.set_ticks([]) # Clean up axes
+    #ax.axes.yaxis.set_ticks([]) # Hide y-axis ticks
     ax.spines['right'].set_visible(False)
     ax.spines['top'].set_visible(False)
     plt.gcf().autofmt_xdate()
@@ -283,8 +292,9 @@ with connection:
     fig.set_size_inches(18, 8)
     #plot_anxiety(ny_counties, "in New York")
     #for region,region_name in zip(regions,region_names): plot_anxiety(region, region_name, stderr=False)
-    plot_anxiety(d1_counties, "in New England")
+    #plot_anxiety(d1_counties, "in New England")
     plot_anxiety(all_counties, "Nationally")
+    plot_events()
     # Make plot pretty
     plt.title("Anxiety Over Time")
     plt.xlabel("Time")
@@ -406,29 +416,13 @@ with connection:
     plt.title("Gallup COVID Panel and LBA Over Time")
     plt.xlabel("Time")
     plt.ylabel("Feature Score")
-    ax.axes.yaxis.set_ticks([]) # Clean up axes
+    #ax.axes.yaxis.set_ticks([]) # Clean up axes
     plt.gcf().autofmt_xdate()
     plt.legend()
     dates= list(pd.date_range('2019-01-01','2021-01-01' , freq='1M')-pd.offsets.MonthBegin(1))
     #dates= list(pd.date_range('2020-03-01','2020-09-01' , freq='1M')-pd.offsets.MonthBegin(1))
     plt.xticks(dates)
     plt.savefig("over_time_gallup_covid.png", bbox_inches='tight')
-
-
-    # TODO Calculate Fixed Effects
-
-    gallup_cols = ['WEC_sadF', 'WEB_worryF'] + ['yearweek_cnty']
-    print("\nMixed Linear Model (Fixed Effects)")
-    data = gallup_full[gallup_cols].merge(lba_full, on='yearweek_cnty')
-    print("data county counts",data['cnty'].value_counts())
-    print(data.head(3))
-    mdf = smf.mixedlm(formula="WEC_sadF ~ avg_dep", data=data, groups=data["cnty"]).fit()
-    #mdf = sm.regression.mixed_linear_model.MixedLM(endog=data['avg_dep'], exog=data[['WEC_sadF', 'WEB_worryF']], groups=data['cnty']).fit()
-    print('\n',mdf.summary())
-    # TODO REMOVE
-    print("CLOSING EARLY")
-    sys.exit()
-
 
     # CDC BRFSS Plot
     plt.clf()
@@ -482,13 +476,14 @@ with connection:
     corr_plot = sns.heatmap(corr, center=0, square=True, linewidths=.5, annot=True)
     corr_plot.figure.savefig("LBA vs Household Pulse.png", bbox_inches='tight')
 
+    # Gallup Correlation (can be done on any level)
     plt.clf()
     group_on = 'yearweek' # yearweek = week x national, yearweek_cnty = week x county, yearweek_state = week x state, cnty = year x county
     merge = lba_full.groupby(group_on).mean().reset_index()[lba_cols+[group_on]].merge(gallup_full.groupby(group_on).mean().reset_index()[gallup_cols+[group_on]], on=group_on)
     corr = merge.corr(method=method)
     print("\nLBA vs Gallup COVID by",group_on,'\n', corr)
     print(len(merge),"samples used for correlation")
-    corr_plot = sns.heatmap(corr, center=0, square=True, linewidths=.5, annot=True)
+    corr_plot = sns.heatmap(corr.head(2), center=0, square=True, linewidths=.5, annot=True)
     corr_plot.figure.savefig("LBA vs Gallup.png", bbox_inches='tight')
 
     plt.clf()
