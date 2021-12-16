@@ -4,16 +4,10 @@ run as `python3 feat_over_time.py`
 
 import os, time, json, datetime, sys
 
-from cycler import cycler
-
 from pymysql import cursors, connect
 from tqdm import tqdm
 
-import datetime as dt
-import numpy as np
-import matplotlib.pyplot as plt
 import pandas as pd
-import seaborn as sns
 import statsmodels.formula.api as smf
 import statsmodels as sm
 
@@ -125,49 +119,54 @@ with connection:
 
     # Process Gallup COVID Panel
     sql = "select fips as cnty, yearweek, WEB_worryF, WEC_sadF, neg_affect_lowArousal, neg_affect_highArousal, neg_affect, pos_affect, affect_balance from gallup_covid_panel_micro_poll.old_hasSadBefAug17_recodedEmoRaceGenPartyAge_v3_02_15;"
-    gallup_full = pd.read_sql(sql, connection)
-    gallup_full = gallup_full[gallup_full['cnty'].isin(all_counties)] # filter to only counties in all_counties
-    gallup_full['yearweek'] = gallup_full['yearweek'].astype(str)
-    gallup_full['yearweek'] = gallup_full['yearweek'].str[:4] + "_" + gallup_full['yearweek'].str[4:]
-    gallup_full['yearweek_cnty'] = gallup_full['yearweek'] + ":" + gallup_full['cnty']
-    gallup_full = pd.merge(gallup_full,county_info[['cnty','state_name']],on='cnty')
-    gallup_full['yearweek_state'] = gallup_full['yearweek'] + ":" + gallup_full['state_name']
-    print("\nGallup COVID Panel (Full)\n",gallup_full.head(10),'\nrow count:',len(gallup_full));
+    gallup = pd.read_sql(sql, connection)
+    gallup = gallup[gallup['cnty'].isin(all_counties)] # filter to only counties in all_counties
+    gallup['yearweek'] = gallup['yearweek'].astype(str)
+    gallup['yearweek'] = gallup['yearweek'].str[:4] + "_" + gallup['yearweek'].str[4:]
+    gallup['yearweek_cnty'] = gallup['yearweek'] + ":" + gallup['cnty']
+    gallup = gallup.groupby("yearweek_cnty").mean().reset_index() # mean aggregate through yearweek_county
+    gallup[['yearweek','cnty']] = gallup['yearweek_cnty'].str.split(":",expand=True)
+    gallup = pd.merge(gallup,county_info[['cnty','state_name','region_name']],on='cnty')
+    gallup['yearweek_state'] = gallup['yearweek'] + ":" + gallup['state_name']
+    print("\nGallup COVID Panel (AVG on yearweek_cnty)\n",gallup.head(10),'\nrow count:',len(gallup));
 
     # Prepare Fixed Effects Data
     gallup_cols = ['WEC_sadF', 'WEB_worryF'] + ['yearweek_cnty']
-    data = gallup_full[gallup_cols].merge(lba_full, on='yearweek_cnty')
+    data = gallup[gallup_cols].merge(lba_full, on='yearweek_cnty')
 
     # filter data to need at least min_entity_count entries per entity
     entity = "cnty"
     entity_value_counts = data[entity].value_counts()
-    min_entity_count = 100
+    min_entity_count = 5
     valid_entities = list(entity_value_counts[entity_value_counts > min_entity_count].index)
     #print("Value Counts:\n",entity_value_counts)
     #print("Valid Entities\n",valid_entities)
     data = data[data[entity].isin(valid_entities)]
+    print("\nMerged LBA and Gallup\n",data.head(10),'\nrow count:',len(data));
 
-    print("\nMerged Data to Calculate Effects\n",data.head(10),'\nrow count:',len(data));
-
-    # Run Mixed Linear Model
-    mdf = smf.mixedlm(formula="WEC_sadF ~ avg_dep", data=data, groups=data["cnty"]).fit()
-    print('\n',mdf.summary())
-
-    # TODO De-Mean Data
-    demean = False
+    # De-Mean Data
     Y = "WEC_sadF" # WEB_worryF
     T = "avg_dep" # avg_anx
-    X = [T,"C(region_name)"] # state_name, region_name, year, yearweek, month, use C(dummy_var) to create dummy vars
+    X = [T,"region_name"] # state_name, region_name, year, yearweek, month, use C(dummy_var) to create dummy vars
     entity = "cnty"
 
-    if demean: # does not support dummy vars
-      mean_data = data.groupby(entity)[X+[Y]].mean()
-      data = (data
-                .set_index(entity) # set the index as the entity indicator
-                [X+[Y]]
-                - mean_data) # subtract the mean data
+    # De-Mean All The Outcomes
+    outcomes = ['avg_dep','avg_anx','WEC_sadF','WEB_worryF']
+    avg_outcomes = ["avg({})".format(x) for x in outcomes]
+    mean_data = data.groupby(entity)[outcomes].mean().reset_index() # find average within each entity
+    mean_data.columns = ["cnty"]+avg_outcomes 
+    demeaned_data = data.merge(mean_data, on='cnty') # merge on the average values
+    demeaned_data[outcomes] = demeaned_data[outcomes] - demeaned_data[avg_outcomes].values # subtract off the average values
+    demeaned_data = demeaned_data.drop(columns=avg_outcomes)
+    print("\nDemeaned Data\n",demeaned_data.head(10),'\nrow count:',len(demeaned_data));
 
     # Run OLS Model
-    mod = smf.ols("{} ~ {}".format(Y, '+'.join(X)), data=data).fit()
-    print('\t\t\tDe-Meaned OLS\n')
+    formula = "WEC_sadF ~ avg_dep + region_name" # change this to alter fixed effects equation
+    print('\t\t\tDe-Meaned OLS on',formula)
+    mod = smf.ols(formula, data=demeaned_data).fit()
     print(mod.summary().tables[1])
+
+    # Run Mixed Linear Model
+    md = smf.mixedlm(formula="WEC_sadF ~ avg_dep + region_name", data=data, groups=data["cnty"])
+    mdf = md.fit()
+    print('\n',mdf.summary())

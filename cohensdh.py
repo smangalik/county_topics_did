@@ -83,23 +83,23 @@ def main():
     msa_info['cnty'] = msa_info['fips'].astype(str).str.zfill(5)
 
     # NOT INDIVIDUAL RESULTS
-    # tables = ["ctlb2.feat$dd_depAnxLex$timelines2019$yw_cnty$1gra",
-    #           "ctlb2.feat$dd_depAnxLex$timelines2020$yw_cnty$1gra"]
-    # feat_val_col = "group_norm"5
-    # groupby_col = "yearweek" # cnty, yearweek
-    # feat_value = "DEP_SCORE" # ANX_SCORE, DEP_SCORE
-    # filter = "WHERE feat = '{}'".format(feat_value)
-    # relevant_columns = "*"
-    # database = 'ctlb2'
+    tables = ["ctlb2.feat$dd_depAnxLex$timelines2019$yw_cnty$1gra",
+              "ctlb2.feat$dd_depAnxLex$timelines2020$yw_cnty$1gra"]
+    feat_val_col = "group_norm"
+    groupby_col = "yearweek" # cnty, yearweek
+    feat_value = "DEP_SCORE" # ANX_SCORE, DEP_SCORE
+    filter = "WHERE feat = '{}'".format(feat_value)
+    relevant_columns = "*"
+    database = 'ctlb2'
 
     # Gallup COVID Panel
-    tables = ["gallup_covid_panel_micro_poll.old_hasSadBefAug17_recodedEmoRaceGenPartyAge_v3_02_15"]
-    feat_val_col = "WEC_sadF" # WEB_worryF, WEC_sadF, pos_affect, neg_affect
-    groupby_col = "yearweek" # cnty, yearweek, yearweek_cnty, division_name, yearweek_msa, month_msa, month_state, quarter_state, quarter_division
-    feat_value = feat_val_col
-    filter = "WHERE {} IS NOT NULL".format(feat_val_col) 
-    relevant_columns = "fips, yearweek, WEA_enjoyF, WEB_worryF, WEC_sadF, WEI_depressionF, WEJ_anxietyF, pos_affect, neg_affect"
-    database = 'gallup_covid_panel_micro_poll'
+    # tables = ["gallup_covid_panel_micro_poll.old_hasSadBefAug17_recodedEmoRaceGenPartyAge_v3_02_15"]
+    # feat_val_col = "WEC_sadF" # WEB_worryF, WEC_sadF, pos_affect, neg_affect
+    # groupby_col = "yearweek" # cnty, yearweek, yearweek_cnty, division_name, yearweek_msa, month_msa, month_state, quarter_state, quarter_division
+    # feat_value = feat_val_col
+    # filter = "WHERE {} IS NOT NULL".format(feat_val_col) 
+    # relevant_columns = "fips, yearweek, WEA_enjoyF, WEB_worryF, WEC_sadF, WEI_depressionF, WEJ_anxietyF, pos_affect, neg_affect"
+    # database = 'gallup_covid_panel_micro_poll'
     
     # Census Household Pulse
     # tables = ["household_pulse.pulse"]
