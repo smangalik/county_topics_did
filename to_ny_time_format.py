@@ -26,8 +26,8 @@ def main():
     county_info = pd.read_csv("county_fips_data.csv",encoding = "utf-8")
     county_info['cnty'] = county_info['fips'].astype(str).str.zfill(5)
 
-    tables = ["ctlb2.feat$dd_depAnxLex$timelines2019$yw_cnty$1gra",
-              "ctlb2.feat$dd_depAnxLex$timelines2020$yw_cnty$1gra"]
+    tables = ["ctlb2.feat$dd_depAnxAng_rw$timelines2019$3upt3_user$yw_cnty$1gra",
+              "ctlb2.feat$dd_depAnxAng_rw$timelines2020$3upt3_user$yw_cnty$1gra"]
     database = 'ctlb2'
 
     sql = "SELECT * FROM {} ".format( tables[0] )
@@ -36,8 +36,8 @@ def main():
     for table in tables[1:]:
         sql = "SELECT * FROM {}".format( table )
         df = pd.read_sql(sql, connection).append(df, ignore_index=True)
-    
-    
+
+
     print("Cleaning up columns")
     df = df[~df['group_id'].str.startswith((':'))]
     df[['yearweek','cnty']] = df['group_id'].str.split(":",expand=True,)
@@ -50,7 +50,7 @@ def main():
     df['county_name'] = df['county_name'].str.replace(" City and Borough","")
     df['county_name'] = df['county_name'].str.replace(" Borough","")
     df['county_name'] = df['county_name'].str.replace(" city","")
-    
+
     print("\nOriginal Data")
     print(df.head())
 
@@ -68,6 +68,7 @@ def main():
     nytimes.columns = ['date','county','state','fips','anxiety','depression']
     nytimes.sort_values('date', ascending=True, inplace=True) # sort by date
     print(nytimes)
+    print(nytimes[nytimes['county']=="Cook"])
 
     # Write to CSV
     nytimes.to_csv("us-counties.csv", index=False)

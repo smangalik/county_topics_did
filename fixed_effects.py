@@ -1,11 +1,16 @@
 """
-run as `python3 feat_over_time.py`
+run as `python3 fixed_effects.py`
 """
+
+import matplotlib
+matplotlib.use('Agg')
 
 import os, time, json, datetime, sys
 
 from pymysql import cursors, connect
 from tqdm import tqdm
+
+import seaborn as sns
 
 import pandas as pd
 import statsmodels.formula.api as smf
@@ -99,7 +104,13 @@ with connection:
     print('Connected to',connection.host)
 
     # Get county feat information
-    county_feats_json = "/data/smangalik/county_feats_ctlb.json"
+    #county_feats_json = "/data/smangalik/county_feats_ctlb_30user.json" # /data/smangalik/county_feats_ctlb_X0user.json
+    
+    #county_feats_json = "/data/smangalik/county_feats_ctlb_std.json" # standardized experiment
+    county_feats_json = "/data/smangalik/county_feats_ctlb_nostd.json" # non-standardized experiment
+    #county_feats_json = "/data/smangalik/county_feats_ctlb_nofs.json" # no feature selection experiment
+    
+    print("Running on",county_feats_json)
     if not os.path.isfile(county_feats_json):
         table_years = [2019,2020]
         county_feats = get_county_feats(cursor,table_years)
@@ -154,19 +165,68 @@ with connection:
     outcomes = ['avg_dep','avg_anx','WEC_sadF','WEB_worryF']
     avg_outcomes = ["avg({})".format(x) for x in outcomes]
     mean_data = data.groupby(entity)[outcomes].mean().reset_index() # find average within each entity
-    mean_data.columns = ["cnty"]+avg_outcomes 
+    mean_data.columns = ["cnty"]+avg_outcomes
     demeaned_data = data.merge(mean_data, on='cnty') # merge on the average values
     demeaned_data[outcomes] = demeaned_data[outcomes] - demeaned_data[avg_outcomes].values # subtract off the average values
     demeaned_data = demeaned_data.drop(columns=avg_outcomes)
+
+    # TODO confirm if standardizing the demeaned data is good
+    cols_to_std = []
+    #cols_to_std = ['WEB_worryF','WEC_sadF','avg_anx','avg_dep']
+    for col in cols_to_std:
+      demeaned_data[col] = demeaned_data[col] / demeaned_data[col].std()
+
     print("\nDemeaned Data\n",demeaned_data.head(10),'\nrow count:',len(demeaned_data));
 
+    print("\nDemeaned Data Stats")
+    print("demeaned_data['WEB_worryF'].std()",demeaned_data['WEB_worryF'].std())
+    print("demeaned_data['WEC_sadF'].std()",demeaned_data['WEC_sadF'].std())
+    print("demeaned_data['avg_anx'].std()",demeaned_data['avg_anx'].std())
+    print("demeaned_data['avg_dep'].std()",demeaned_data['avg_dep'].std())
+    print()
+
     # Run OLS Model
-    formula = "WEC_sadF ~ avg_dep + region_name" # change this to alter fixed effects equation
+    #formula = "WEC_sadF ~ avg_dep + region_name" # change this to alter fixed effects equation
+    formula = "WEB_worryF ~ avg_anx + region_name" # change this to alter fixed effects equation
+    #formula = "WEC_sadF ~ avg_anx + region_name" # change this to alter fixed effects equation
+    #formula = "WEB_worryF ~ avg_dep + region_name" # change this to alter fixed effects equation
     print('\t\t\tDe-Meaned OLS on',formula)
     mod = smf.ols(formula, data=demeaned_data).fit()
     print(mod.summary().tables[1])
 
+    # Run correlations (can be done on any level)
+    group_on = 'yearweek_cnty' # yearweek = week x national, yearweek_cnty = week x county, yearweek_state = week x state, cnty = year x county
+    merge = demeaned_data.groupby(group_on).mean().reset_index()
+    print("\nAggregated Data for Correlation\n",merge.head(5))
+    corr = merge.corr(method="pearson")
+    print("\nLBA vs Gallup COVID by",group_on,'\n', corr)
+    print(len(merge),"samples used for correlation")
+    corr_plot = sns.heatmap(corr.head(2), center=0, square=True, linewidths=.5, annot=True)
+    corr_plot.figure.savefig("LBA vs Gallup Demeaned.png", bbox_inches='tight')
+
     # Run Mixed Linear Model
-    md = smf.mixedlm(formula="WEC_sadF ~ avg_dep + region_name", data=data, groups=data["cnty"])
-    mdf = md.fit()
-    print('\n',mdf.summary())
+    # md = smf.mixedlm(formula="WEC_sadF ~ avg_dep + region_name", data=data, groups=data["cnty"])
+    # mdf = md.fit()
+    # print('\n',mdf.summary())
+
+    # Make Gallup into feat table: ['group_id', 'feat', 'value', 'group_norm']
+    gallup_worry = gallup.copy(deep=True)
+    gallup_worry['feat'] = "WEB_worryF"
+    gallup_worry['value'] = gallup_worry['WEB_worryF']
+    gallup_sad = gallup.copy(deep=True)
+    gallup_sad['feat'] = "WEC_sadF"
+    gallup_sad['value'] = gallup_worry['WEC_sadF']
+    gallup_mysql = pd.concat([gallup_worry, gallup_sad])
+    gallup_mysql = gallup_mysql.rename(columns={"yearweek_cnty":"group_id"})
+    gallup_mysql["group_norm"] = gallup_mysql["value"]
+    gallup_mysql = gallup_mysql[['group_id', 'feat', 'value', 'group_norm']]
+    print(gallup_mysql)
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.engine.url import URL
+    myDB = URL(drivername='mysql', host='localhost',
+      database='ctlb2', query={ 'read_default_file' : "~/.my.cnf" }
+    )
+    engine = create_engine(name_or_url=myDB)
+
+    gallup_mysql.to_sql("feat$gallup_covid$yw_cnty",con=engine, if_exists='replace', index=False)

@@ -35,11 +35,24 @@ county_info['cnty'] = county_info['fips'].astype(str).str.zfill(5)
 def get_county_feats(cursor, table_years):
   county_feats = {}
   for table_year in table_years:
-    print('Processing {}'.format(table_year))
-
-    # sql = "select * from ctlb2.feat$dd_depAnxAng$timelines{}$yw_cnty$1gra;".format(table_year) # unweighted
-    sql = "select * from ctlb2.feat$dd_depAnxAng_rw$timelines{}$3upt3_user$yw_cnty$1gra;".format(table_year) # reweighted
+    #sql = "select * from ctlb2.feat$dd_depAnxAng$timelines{}$yw_cnty$1gra;".format(table_year) # unweighted
+    #sql = "select * from ctlb2.feat$dd_depAnxAng_rw$timelines{}$3upt100user$yw_cnty$1gra;".format(table_year) # reweighted 100 users for GFT
+    #sql = "select * from ctlb2.feat$dd_depAnxAng_rw$timelines{}$3upt3_user$yw_cnty$1gra;".format(table_year) # reweighted 30 users for GFT
     
+    #sql = "select * from ctlb2.feat$dd_depAnxLex_std$timelines{}$yw_cnty;".format(table_year) # standardized test
+    #sql = "select * from ctlb2.feat$dd_depAnxLex_nostd$timelines{}$yw_cnty;".format(table_year) # non-standardized test
+    #sql = "select * from ctlb2.feat$dd_depAnxLex_nofs$timelines{}$yw_cnty;".format(table_year) # no feature selection test
+
+    #sql = "select * from ctlb2.feat$dd_depAnxLex_ctlb2$timelines{}$3upt50user$yw_cnty;".format(table_year)       # 50  GFT yw_cnty
+    #sql = "select * from ctlb2.feat$dd_depAnxLex_ctlb2$timelines{}$3upt500user$yw_cnty;".format(table_year)      # 500 GFT yw_cnty
+    # sql = "select * from ctlb2.feat$dd_depAnxLex_ctlb2$timelines{}$3upt300user$yw_supercnty;".format(table_year) # 300 GFT yw_supercnty
+
+    # sql = "select * from ctlb2.feat$dd_depAnxLex_ctlb2$timelines19to20$3upt50user$yw_cnty;"       # 50  GFT yw_cnty 19to20
+    sql = "select * from ctlb2.feat$dd_depAnxLex_ctlb2$timelines19to20$3upt500user$yw_cnty;"      # 500 GFT yw_cnty 19to20
+    # sql = "select * from ctlb2.feat$dd_depAnxLex_ctlb2$timelines19to20$3upt300user$yw_supercnty;" # 300 GFT yw_supercnty 19to20
+
+    print('Processing {}'.format(sql))
+
     cursor.execute(sql)
 
     for result in tqdm(cursor.fetchall_unbuffered()): # Read _unbuffered() to save memory
@@ -48,7 +61,7 @@ def get_county_feats(cursor, table_years):
 
       if feat == '_int': continue
       yearweek, county = yw_county.split(":")
-      if county == "" or yearweek == "": continue
+      if county == "" or yearweek == "": continue # skip corrupted values
       county = str(county).zfill(5)
 
       # Store county_feats
@@ -171,7 +184,7 @@ def plot_anxiety(counties_of_interest, counties_name, stderr=True):
   if stderr:
     ax.fill_between(x, df['ci_anx_down'].tolist(), df['ci_anx_up'].tolist(), alpha=0.3) # error area
 
-def plot_events():
+def plot_events(text=True):
   events_dict = {}
   events_dict["Christmas 2019"] = [dt.datetime(2019, 12, 25), dt.datetime(2019, 12, 29)]
   events_dict["First US Case COVID"] = [dt.datetime(2020, 1, 21), dt.datetime(2020, 1, 28)]
@@ -182,8 +195,9 @@ def plot_events():
   bottom, top = ax.get_ylim()
   for event_name, dates in events_dict.items():
     ax.axvspan(dates[0], dates[1], alpha=0.3, color='g', label='_nolegend_') # Plot line
-    plt.text(dates[0], bottom, s="{}  ".format(event_name), rotation=270, verticalalignment='bottom') # Line text
-  
+    if text:
+      plt.text(dates[0], bottom, s="{}  ".format(event_name), rotation=270, verticalalignment='bottom') # Line text
+
 
 with connection:
   with connection.cursor(cursors.SSCursor) as cursor:
@@ -191,13 +205,25 @@ with connection:
 
     # Get county feat information,
     # county_feats['01087'] = {'2020_34': {'DEP_SCORE': 0.2791998298997296, 'ANX_SCORE': 1.759353260415711}}}
-    county_feats_json = "/data/smangalik/county_feats_ctlb.json"
+    #county_feats_json = "/data/smangalik/county_feats_ctlb_100user.json" # /data/smangalik/county_feats_ctlb_xx0user.json
+    
+    #county_feats_json = "/data/smangalik/county_feats_ctlb_nostd.json" # 500 GFT, unscaled
+
+    #county_feats_json = "/data/smangalik/feat_depAnxLex_3upt50user_ywcnty.json"       # 50 GFT
+    #county_feats_json = "/data/smangalik/feat_depAnxLex_3upt500user_ywcnty.json"      # 500 GFT
+    #county_feats_json = "/data/smangalik/feat_depAnxLex_3upt300user_superywcnty.json" # 300 GFT, Supercounty
+
+    #county_feats_json = "/data/smangalik/feat_depAnxLex_19to20_3upt50user_ywcnty.json"       # 50 GFT 2019-2020
+    county_feats_json = "/data/smangalik/feat_depAnxLex_19to20_3upt500user_ywcnty.json"      # 500 GFT 2019-2020
+    #county_feats_json = "/data/smangalik/feat_depAnxLex_19to20_3upt300user_ywsupercnty.json" # 300 GFT, Supercounty 2019-2020
+
+    print("Running on",county_feats_json)
     if not os.path.isfile(county_feats_json):
         #table_years = list(range(2012, 2017))
-        table_years = [2019,2020]
+        #table_years = [2019,2020] 
+        table_years = [2020]
         county_feats = get_county_feats(cursor,table_years)
         with open(county_feats_json,"w") as json_file: json.dump(county_feats,json_file)
-    start_time = time.time()
     print("\nImporting produced county features")
     with open(county_feats_json) as json_file:
         county_feats = json.load(json_file)
@@ -291,9 +317,9 @@ with connection:
     fig, ax = plt.subplots(1)
     fig.set_size_inches(18, 8)
     #plot_anxiety(ny_counties, "in New York")
-    #for region,region_name in zip(regions,region_names): plot_anxiety(region, region_name, stderr=False)
+    for region,region_name in zip(regions,region_names): plot_anxiety(region, region_name, stderr=False)
     #plot_anxiety(d1_counties, "in New England")
-    plot_anxiety(all_counties, "Nationally")
+    #plot_anxiety(all_counties, "Nationally")
     plot_events()
     # Make plot pretty
     plt.title("Anxiety Over Time")
@@ -346,8 +372,8 @@ with connection:
     anx_line = ax2.plot(x, household_pulse['avg(gad2_sum)'], 'b-', label='Worry and Anxiety (0 is best)')
     dep_line = ax2.plot(x, household_pulse['avg(phq2_sum)'], 'r-', label='Disinterest and Depression (0 is best)')
     gen_line = ax2.plot(x, household_pulse['avg(gen_health)'], 'g-', label='General Health (5 is best)')
-    plot_events()
-    plot_depression(all_counties, "Nationally")
+    #plot_events()
+    #plot_depression(all_counties, "Nationally")
     plot_anxiety(all_counties, "Nationally")
     plt.title("Baselines Over Time")
     plt.xlabel("Time")
@@ -400,9 +426,9 @@ with connection:
     gallup['date'] = gallup['yearweek'].apply(lambda yw: yearweek_to_dates(yw)[1])
 
     x = gallup['date'].tolist()
-    sad_line = ax2.plot(x, gallup['WEC_sadF'], label='Sadness', c="orange")
-    sad_err = ax2.errorbar(x, gallup['WEC_sadF'], gallup_stderr['WEC_sadF'], c="red", linestyle='None', label='_nolegend_')
-    worry_line = ax2.plot(x, gallup['WEB_worryF'], label='Worry')
+    #sad_line = ax2.plot(x, gallup['WEC_sadF'], label='Sadness', c="orange")
+    #sad_err = ax2.errorbar(x, gallup['WEC_sadF'], gallup_stderr['WEC_sadF'], c="red", linestyle='None', label='_nolegend_')
+    worry_line = ax2.plot(x, gallup['WEB_worryF'], label='Worry', alpha=1.0)
     worry_err = ax2.errorbar(x, gallup['WEB_worryF'], gallup_stderr['WEB_worryF'], linestyle='None', label='_nolegend_')
 
     #pos_line = ax2.plot(x, gallup['pos_affect'], label='Pos Affect')
@@ -410,8 +436,8 @@ with connection:
     #low_neg_line = ax2.plot(x, gallup['neg_affect_lowArousal'], label='Low Arousal Neg Affect') # Depression
     #high_neg_line = ax2.plot(x, gallup['neg_affect_highArousal'], label='High Arousal Neg Affect') # Anxiety
     #affect_bal_line = ax2.plot(x, gallup['affect_balance'], label='Affect Balance')
-    plot_events()
-    plot_depression(all_counties, "Nationally")
+    #plot_events(text=True)
+    #plot_depression(all_counties, "Nationally")
     plot_anxiety(all_counties, "Nationally")
     plt.title("Gallup COVID Panel and LBA Over Time")
     plt.xlabel("Time")
@@ -449,9 +475,9 @@ with connection:
     menthlth_err = ax2.errorbar(x, brfss['MENTHLTH_mean'], brfss['MENTHLTH_sem'], linestyle='None', label='_nolegend_', color='r')
     poorhlth_line = ax2.plot(x, brfss['POORHLTH_mean'], label='Health Affected Activities (0 is best)',color='g')
     menthlth_err = ax2.errorbar(x, brfss['POORHLTH_mean'], brfss['POORHLTH_sem'], linestyle='None', label='_nolegend_', color='g')
-    plot_events()
+    #plot_events()
     plot_depression(all_counties, "Nationally")
-    plot_anxiety(all_counties, "Nationally")
+    #plot_anxiety(all_counties, "Nationally")
     plt.title("Baselines Over Time")
     plt.xlabel("Time")
     plt.ylabel("Days")
@@ -462,19 +488,21 @@ with connection:
     plt.savefig("over_time_brfss.png", bbox_inches='tight')
 
     # Show correlations
+    print("\n----- Correlations Against Psych Evaluations -----\n")
     lba_cols = ['avg_anx','avg_dep']
     household_cols = ['avg(gen_health)', 'avg(gad2_sum)', 'avg(phq2_sum)']
-    gallup_cols = ['WEC_sadF', 'WEB_worryF', 'pos_affect', 'neg_affect','neg_affect_lowArousal','neg_affect_highArousal','affect_balance']
+    gallup_cols = ['WEC_sadF', 'WEB_worryF'] #, 'pos_affect', 'neg_affect','neg_affect_lowArousal','neg_affect_highArousal','affect_balance']
     brfss_cols = ['MENTHLTH_mean',  'POORHLTH_mean',  'ACEDEPRS_mean', '_MENT14D_mean']
     method="pearson"
 
     plt.clf()
     merge = df[lba_cols+['yearweek']].merge(household_pulse[household_cols+['yearweek']], on='yearweek') # national x week
     corr = merge.corr(method=method)
-    print("\nLBA vs Household Pulse\n", corr)
-    print(len(merge),"samples used for correlation")
-    corr_plot = sns.heatmap(corr, center=0, square=True, linewidths=.5, annot=True)
-    corr_plot.figure.savefig("LBA vs Household Pulse.png", bbox_inches='tight')
+    print("\nLBA vs Household Pulse by yearweek\n", corr)
+    print(len(merge),"samples usable for correlation")
+    if len(merge) > 0:
+      corr_plot = sns.heatmap(corr, center=0, square=True, linewidths=.5, annot=True)
+      corr_plot.figure.savefig("LBA vs Household Pulse.png", bbox_inches='tight')
 
     # Gallup Correlation (can be done on any level)
     plt.clf()
@@ -483,13 +511,15 @@ with connection:
     corr = merge.corr(method=method)
     print("\nLBA vs Gallup COVID by",group_on,'\n', corr)
     print(len(merge),"samples used for correlation")
-    corr_plot = sns.heatmap(corr.head(2), center=0, square=True, linewidths=.5, annot=True)
-    corr_plot.figure.savefig("LBA vs Gallup.png", bbox_inches='tight')
+    if len(merge) > 0:
+      corr_plot = sns.heatmap(corr.head(2), center=0, square=True, linewidths=.5, annot=True)
+      corr_plot.figure.savefig("LBA vs Gallup.png", bbox_inches='tight')
 
     plt.clf()
     merge = df[lba_cols+['yearweek']].merge(brfss[brfss_cols+['yearweek']], on='yearweek')
     corr = merge.corr(method=method)
-    print("\nLBA vs BRFSS\n", corr)
+    print("\nLBA vs BRFSS by yearweek\n", corr)
     print(len(merge),"samples used for correlation")
-    corr_plot = sns.heatmap(corr, center=0, square=True, linewidths=.5, annot=True)
-    corr_plot.figure.savefig("LBA vs BRFSS.png", bbox_inches='tight')
+    if len(merge) > 0:
+      corr_plot = sns.heatmap(corr, center=0, square=True, linewidths=.5, annot=True)
+      corr_plot.figure.savefig("LBA vs BRFSS.png", bbox_inches='tight')

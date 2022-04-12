@@ -9,9 +9,9 @@ from utils import yearweek_to_dates, date_to_quarter
 
 sig_threshold = 0.1
 
-def permutation_cohens_d(x, n_perms=30):
-    if len(x) <= 2: return np.nan, np.nan
-    if np.std(x) < 1e-6: return np.nan, np.nan 
+def permutation_cohens_d(x, n_perms=30, min_entries=2):
+    if len(x) <= min_entries: return np.nan, np.nan
+    if np.std(x) < 1e-6: return np.nan, np.nan
     ds = []
     std = np.std(x)
     random.seed(a=25, version=2)
@@ -22,11 +22,11 @@ def permutation_cohens_d(x, n_perms=30):
         d = abs(np.mean(a) - np.mean(b)) / std
         ds.append(d)
     avg_d = np.mean(ds)
-    d_stderr = np.std(ds) / np.sqrt(len(ds))   
+    d_stderr = np.std(ds) / np.sqrt(len(ds))
     return avg_d, d_stderr
 
-def cohens_d(x):
-    if len(x) <= 2: return np.nan
+def cohens_d(x, min_entries=2):
+    if len(x) <= min_entries: return np.nan
     if np.std(x) < 1e-6: return np.nan
     random.seed(a=25, version=2)
     shuffled = random.sample(x, len(x))
@@ -35,8 +35,9 @@ def cohens_d(x):
     d = abs(np.mean(a) - np.mean(b)) / np.std(x)
     return d
 
-def permutation_cohens_h(x, n_perms=30):
-    if len(x) <= 2: return np.nan, np.nan
+def permutation_cohens_h(x, n_perms=30, min_entries=2):
+    if len(x) <= min_entries: return np.nan, np.nan
+    if np.std(x) < 1e-6: return np.nan, np.nan
     hs = []
     random.seed(a=25, version=2)
     for i in range(n_perms):
@@ -48,11 +49,11 @@ def permutation_cohens_h(x, n_perms=30):
         h = abs(2 * (np.arcsin(np.sqrt(p1))- np.arcsin(np.sqrt(p2))))
         hs.append(h)
     avg_h = np.mean(hs)
-    h_stderr = np.std(hs) / np.sqrt(len(hs))   
+    h_stderr = np.std(hs) / np.sqrt(len(hs))
     return avg_h, h_stderr
 
-def cohens_h(x):
-    if len(x) <= 2: return np.nan
+def cohens_h(x, min_entries=2):
+    if len(x) <= min_entries: return np.nan
     random.seed(a=25, version=2)
     shuffled = random.sample(x, len(x))
     split_index = len(shuffled)//2
@@ -83,24 +84,24 @@ def main():
     msa_info['cnty'] = msa_info['fips'].astype(str).str.zfill(5)
 
     # NOT INDIVIDUAL RESULTS
-    tables = ["ctlb2.feat$dd_depAnxLex$timelines2019$yw_cnty$1gra",
-              "ctlb2.feat$dd_depAnxLex$timelines2020$yw_cnty$1gra"]
-    feat_val_col = "group_norm"
-    groupby_col = "yearweek" # cnty, yearweek
-    feat_value = "DEP_SCORE" # ANX_SCORE, DEP_SCORE
-    filter = "WHERE feat = '{}'".format(feat_value)
-    relevant_columns = "*"
-    database = 'ctlb2'
+    # tables = ["ctlb2.feat$dd_depAnxLex$timelines2019$yw_cnty$1gra",
+    #           "ctlb2.feat$dd_depAnxLex$timelines2020$yw_cnty$1gra"]
+    # feat_val_col = "group_norm"
+    # groupby_col = "yearweek" # cnty, yearweek
+    # feat_value = "DEP_SCORE" # ANX_SCORE, DEP_SCORE
+    # filter = "WHERE feat = '{}'".format(feat_value)
+    # relevant_columns = "*"
+    # database = 'ctlb2'
 
     # Gallup COVID Panel
-    # tables = ["gallup_covid_panel_micro_poll.old_hasSadBefAug17_recodedEmoRaceGenPartyAge_v3_02_15"]
-    # feat_val_col = "WEC_sadF" # WEB_worryF, WEC_sadF, pos_affect, neg_affect
-    # groupby_col = "yearweek" # cnty, yearweek, yearweek_cnty, division_name, yearweek_msa, month_msa, month_state, quarter_state, quarter_division
-    # feat_value = feat_val_col
-    # filter = "WHERE {} IS NOT NULL".format(feat_val_col) 
-    # relevant_columns = "fips, yearweek, WEA_enjoyF, WEB_worryF, WEC_sadF, WEI_depressionF, WEJ_anxietyF, pos_affect, neg_affect"
-    # database = 'gallup_covid_panel_micro_poll'
-    
+    tables = ["gallup_covid_panel_micro_poll.old_hasSadBefAug17_recodedEmoRaceGenPartyAge_v3_02_15"]
+    feat_val_col = "WEC_sadF" # WEB_worryF, WEC_sadF, pos_affect, neg_affect
+    groupby_col = "cnty" # cnty, yearweek, state_name yearweek_cnty, division_name, yearweek_msa, month_msa, month_state, quarter_state, quarter_division
+    feat_value = feat_val_col
+    filter = "WHERE {} IS NOT NULL".format(feat_val_col)
+    relevant_columns = "fips, yearweek, WEA_enjoyF, WEB_worryF, WEC_sadF, WEI_depressionF, WEJ_anxietyF, pos_affect, neg_affect"
+    database = 'gallup_covid_panel_micro_poll'
+
     # Census Household Pulse
     # tables = ["household_pulse.pulse"]
     # filter = ""
@@ -111,7 +112,7 @@ def main():
     # database = 'household_pulse'
 
 
-    sql = "SELECT {} FROM {} {}".format( 
+    sql = "SELECT {} FROM {} {}".format(
         relevant_columns, tables[0], filter
     )
     df = pd.read_sql(sql, connection)
@@ -121,8 +122,8 @@ def main():
             relevant_columns, table, filter
         )
         df = pd.read_sql(sql, connection).append(df, ignore_index=True)
-    
-    
+
+
     print("Cleaning up columns")
     if database == 'ctlb2':
         df = df[~df['group_id'].str.startswith((':'))]
@@ -148,29 +149,30 @@ def main():
             df = df[df['msa'].notna()]
             df['yearweek_msa'] = df['yearweek'] + ":" + df['msa']
             df['month_msa'] = df['month'] + ":" + df['msa']
-        
-    # Peek the clearned data
+
+    # Peek the cleaned data
     print(df)
 
     grouped = df.groupby(groupby_col)[feat_val_col].apply(list).reset_index(name=feat_value)
     grouped[feat_value] = grouped[feat_value].apply(lambda x: [i for i in x if str(i) != "nan"]) # clean NaNs
     grouped['std'] = [np.array(x).std() for x in grouped[feat_value].values]
-    
 
-    min_len = 2
-    grouped['n'] = [len(x) for x in grouped[feat_value].values]  
-    grouped = grouped[grouped['n'] >= min_len] # list has more than 2 values
+
+    grouped['n'] = [len(x) for x in grouped[feat_value].values]
+    # min_len = 10
+    # grouped = grouped[grouped['n'] >= min_len] # list has more than 2 values
 
     # Calculate Cohen's D
-    grouped['d_sample'] = [cohens_d(x) for x in grouped[feat_value].values]
-    grouped['h_sample'] = [cohens_h(x) for x in grouped[feat_value].values]
-    
+    min_entries = 10
+    grouped['d_sample'] = [cohens_d(x, min_entries=min_entries) for x in grouped[feat_value].values]
+    grouped['h_sample'] = [cohens_h(x, min_entries=min_entries) for x in grouped[feat_value].values]
+
     # Calculate Permutation Test of D
-    grouped[["d_perm","d_perm_stderr"]] = grouped.apply(lambda x: permutation_cohens_d(x[feat_value]), axis=1,result_type ='expand')
-    grouped[["h_perm","h_perm_stderr"]] = grouped.apply(lambda x: permutation_cohens_h(x[feat_value]), axis=1,result_type ='expand')  
+    grouped[["d_perm","d_perm_stderr"]] = grouped.apply(lambda x: permutation_cohens_d(x[feat_value], min_entries=min_entries), axis=1,result_type ='expand')
+    grouped[["h_perm","h_perm_stderr"]] = grouped.apply(lambda x: permutation_cohens_h(x[feat_value], min_entries=min_entries), axis=1,result_type ='expand')
     grouped['d_perm+ci'] = grouped['d_perm'] + (grouped['d_perm_stderr'] * 1.96)
     grouped['h_perm+ci'] = grouped['h_perm'] + (grouped['h_perm_stderr'] * 1.96)
-    
+
 
     # Filter D Values
     if database == 'gallup_covid_panel_micro_poll':
@@ -187,19 +189,29 @@ def main():
     else:
         print("\nFor {} and {} we find the following {}/{} groups to have a Permutation Cohen's D less than {}:\n".format(
         feat_value, groupby_col, len(significant), len(grouped), sig_threshold))
-    
-    
+
+
     print("Average Perm D  = {}; Average Perm D + CI = {}".format( round(np.mean(grouped['d_perm']),4), round(np.mean(grouped['d_perm+ci']),4) ))
     print("Average Perm H  = {}; Average Perm H + CI = {}".format( round(np.mean(grouped['h_perm']),4), round(np.mean(grouped['h_perm+ci']),4) ))
-    print("Overall Median / Mean n = {} / {}".format( np.median(grouped['n']), round(np.mean(grouped['n'])), 2) ) 
-    #print("Std Dev Perm D = {}; Std Dev Perm D + CI = {}".format( np.std(grouped['d_perm']), np.std(grouped['d_perm+ci']) )) 
+    print("Overall Median / Mean n = {} / {}".format( np.median(grouped['n']), round(np.mean(grouped['n'])), 2) )
+    #print("Std Dev Perm D = {}; Std Dev Perm D + CI = {}".format( np.std(grouped['d_perm']), np.std(grouped['d_perm+ci']) ))
     print()
 
     ignore_cols = ['d_perm_stderr','h_perm_stderr']
     print("\nHere are the significant findings:\n", significant.drop(ignore_cols, axis=1))
 
     print("\nHere are the insignificant findings:\n", insignificant.drop(ignore_cols, axis=1))
-    
+
+    reliable_entities = list(significant[groupby_col])
+    print("\nReliable entities:",reliable_entities)
+
+    if database == "gallup_covid_panel_micro_poll":
+        df_cnty = df.groupby('cnty').mean().reset_index()
+        df_cnty = pd.merge(df_cnty,county_info[['cnty','state_name','region_name','division_name']],on='cnty')
+        df_cnty = df_cnty[df_cnty[groupby_col].isin(reliable_entities)]
+        df_cnty.to_csv("~/gallup_covid_cnty.csv",index=False)
+        print("Agg on County\n",df_cnty)
+
 
 if __name__ == "__main__":
     main()
