@@ -28,33 +28,6 @@ connection  = connect(read_default_file="~/.my.cnf")
 county_info = pd.read_csv("/data/smangalik/county_fips_data.csv",encoding = "utf-8")
 county_info['cnty'] = county_info['fips'].astype(str).str.zfill(5)
 
-# Iterate over all time units to create county_feats[county][year_week][DEP_SCORE] = feats
-def get_county_feats(cursor, table_years):
-  county_feats = {}
-  for table_year in table_years:
-    print('Processing {}'.format(table_year))
-
-    sql = "select * from ctlb2.feat$dd_depAnxAng$timelines{}$yw_cnty$1gra;".format(table_year)
-    cursor.execute(sql)
-
-    for result in tqdm(cursor.fetchall_unbuffered()): # Read _unbuffered() to save memory
-
-      yw_county, feat, value, value_norm = result
-
-      if feat == '_int': continue
-      yearweek, county = yw_county.split(":")
-      if county == "" or yearweek == "": continue
-      county = str(county).zfill(5)
-
-      # Store county_feats
-      if county_feats.get(county) is None:
-        county_feats[county] = {}
-      if county_feats[county].get(yearweek) is None:
-        county_feats[county][yearweek] = {}
-      county_feats[county][yearweek][feat] = value_norm
-
-  return county_feats
-
 def yearweek_to_dates(yw):
   year, week = yw.split("_")
   year, week = int(year), int(week)
@@ -106,20 +79,19 @@ with connection:
     # Get county feat information
     #county_feats_json = "/data/smangalik/county_feats_ctlb_30user.json" # /data/smangalik/county_feats_ctlb_X0user.json
     
-    #county_feats_json = "/data/smangalik/county_feats_ctlb_std.json" # standardized experiment
     county_feats_json = "/data/smangalik/county_feats_ctlb_nostd.json" # non-standardized experiment
-    #county_feats_json = "/data/smangalik/county_feats_ctlb_nofs.json" # no feature selection experiment
+
+    #county_feats_json = "/data/smangalik/feat_depAnxLex_19to20_3upt50user_ywcnty.json"       # 50 GFT scaled
+    #county_feats_json = "/data/smangalik/feat_depAnxLex_19to20_3upt500user_ywcnty.json"      # 500 GFT scaled
+    #county_feats_json = "/data/smangalik/feat_depAnxLex_19to20_3upt300user_ywsupercnty.json" # 300 GFT scaled
     
     print("Running on",county_feats_json)
     if not os.path.isfile(county_feats_json):
-        table_years = [2019,2020]
-        county_feats = get_county_feats(cursor,table_years)
-        with open(county_feats_json,"w") as json_file: json.dump(county_feats,json_file)
-    start_time = time.time()
+      print("County data not available")
+      sys.exit(1)
     print("\nImporting produced county features")
     with open(county_feats_json) as json_file:
         county_feats = json.load(json_file)
-    print("Import complete\n")
     all_counties = county_feats.keys()
     county_list = all_counties
     print("Counties considered:", len(county_list), "\n")
@@ -186,8 +158,8 @@ with connection:
     print()
 
     # Run OLS Model
-    #formula = "WEC_sadF ~ avg_dep + region_name" # change this to alter fixed effects equation
-    formula = "WEB_worryF ~ avg_anx + region_name" # change this to alter fixed effects equation
+    formula = "WEC_sadF ~ avg_dep + region_name" # change this to alter fixed effects equation
+    #formula = "WEB_worryF ~ avg_anx + region_name" # change this to alter fixed effects equation
     #formula = "WEC_sadF ~ avg_anx + region_name" # change this to alter fixed effects equation
     #formula = "WEB_worryF ~ avg_dep + region_name" # change this to alter fixed effects equation
     print('\t\t\tDe-Meaned OLS on',formula)
@@ -210,23 +182,23 @@ with connection:
     # print('\n',mdf.summary())
 
     # Make Gallup into feat table: ['group_id', 'feat', 'value', 'group_norm']
-    gallup_worry = gallup.copy(deep=True)
-    gallup_worry['feat'] = "WEB_worryF"
-    gallup_worry['value'] = gallup_worry['WEB_worryF']
-    gallup_sad = gallup.copy(deep=True)
-    gallup_sad['feat'] = "WEC_sadF"
-    gallup_sad['value'] = gallup_worry['WEC_sadF']
-    gallup_mysql = pd.concat([gallup_worry, gallup_sad])
-    gallup_mysql = gallup_mysql.rename(columns={"yearweek_cnty":"group_id"})
-    gallup_mysql["group_norm"] = gallup_mysql["value"]
-    gallup_mysql = gallup_mysql[['group_id', 'feat', 'value', 'group_norm']]
-    print(gallup_mysql)
+    # gallup_worry = gallup.copy(deep=True)
+    # gallup_worry['feat'] = "WEB_worryF"
+    # gallup_worry['value'] = gallup_worry['WEB_worryF']
+    # gallup_sad = gallup.copy(deep=True)
+    # gallup_sad['feat'] = "WEC_sadF"
+    # gallup_sad['value'] = gallup_worry['WEC_sadF']
+    # gallup_mysql = pd.concat([gallup_worry, gallup_sad])
+    # gallup_mysql = gallup_mysql.rename(columns={"yearweek_cnty":"group_id"})
+    # gallup_mysql["group_norm"] = gallup_mysql["value"]
+    # gallup_mysql = gallup_mysql[['group_id', 'feat', 'value', 'group_norm']]
+    # print(gallup_mysql)
 
-    from sqlalchemy import create_engine
-    from sqlalchemy.engine.url import URL
-    myDB = URL(drivername='mysql', host='localhost',
-      database='ctlb2', query={ 'read_default_file' : "~/.my.cnf" }
-    )
-    engine = create_engine(name_or_url=myDB)
+    # from sqlalchemy import create_engine
+    # from sqlalchemy.engine.url import URL
+    # myDB = URL(drivername='mysql', host='localhost',
+    #   database='ctlb2', query={ 'read_default_file' : "~/.my.cnf" }
+    # )
+    # engine = create_engine(name_or_url=myDB)
 
-    gallup_mysql.to_sql("feat$gallup_covid$yw_cnty",con=engine, if_exists='replace', index=False)
+    # gallup_mysql.to_sql("feat$gallup_covid$yw_cnty",con=engine, if_exists='replace', index=False)

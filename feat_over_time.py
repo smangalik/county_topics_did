@@ -23,6 +23,16 @@ from pandas.plotting import register_matplotlib_converters
 
 register_matplotlib_converters()
 
+# Set colors and line styles
+dep_blue = '#1f77b4'
+anx_orange = '#ff7f0e'
+blue_scale = ['#89cff0','#00ffef','#00b7eb','#6495ed','#007fff','4666ff']
+orange_scale = ['#ffae42','#ffa500','#ff8c00','#ff6700','#ff4500','#cc5500']
+simple_blue = ['skyblue','blue','mediumslateblue','darkviolet','black']
+simple_orange = ['sandybrown','darkorange','gold','red','darkred','black']
+markers = ['s','*','+','x','--','o']
+linestyles = ['-','--','-.',':','.',',']
+
 # Open default connection
 print('Connecting to MySQL...')
 connection  = connect(read_default_file="~/.my.cnf")
@@ -47,9 +57,9 @@ def get_county_feats(cursor, table_years):
     #sql = "select * from ctlb2.feat$dd_depAnxLex_ctlb2$timelines{}$3upt500user$yw_cnty;".format(table_year)      # 500 GFT yw_cnty
     # sql = "select * from ctlb2.feat$dd_depAnxLex_ctlb2$timelines{}$3upt300user$yw_supercnty;".format(table_year) # 300 GFT yw_supercnty
 
-    # sql = "select * from ctlb2.feat$dd_depAnxLex_ctlb2$timelines19to20$3upt50user$yw_cnty;"       # 50  GFT yw_cnty 19to20
+    #sql = "select * from ctlb2.feat$dd_depAnxLex_ctlb2$timelines19to20$3upt50user$yw_cnty;"       # 50  GFT yw_cnty 19to20
     sql = "select * from ctlb2.feat$dd_depAnxLex_ctlb2$timelines19to20$3upt500user$yw_cnty;"      # 500 GFT yw_cnty 19to20
-    # sql = "select * from ctlb2.feat$dd_depAnxLex_ctlb2$timelines19to20$3upt300user$yw_supercnty;" # 300 GFT yw_supercnty 19to20
+    #sql = "select * from ctlb2.feat$dd_depAnxLex_ctlb2$timelines19to20$3upt300user$yw_supercnty;" # 300 GFT yw_supercnty 19to20
 
     print('Processing {}'.format(sql))
 
@@ -80,6 +90,7 @@ def county_list_to_df(county_list):
       available_yws.extend( list(county_feats[county].keys()) )
   available_yws = list(set(available_yws))
   available_yws.sort()
+  min_yw = available_yws.pop(0)
 
   # Get feature scores over time
   # yw_anx_score[yearweek] = [ all anx_scores... ]
@@ -89,6 +100,10 @@ def county_list_to_df(county_list):
   for county in county_list:
       yearweeks = list(county_feats[county].keys())
       for yearweek in yearweeks:
+          # skip the minimum possible yw
+          if yearweek == min_yw:
+            continue
+
           # Add anxiety scores
           if yearweek not in yw_anx_score.keys():
               yw_anx_score[yearweek] = []
@@ -162,35 +177,49 @@ def county_list_to_full_df(county_list):
 
   return df
 
-def plot_depression(counties_of_interest, counties_name, stderr=True):
+def plot_depression(counties_of_interest, counties_name, stderr=True, date_range=None, color=dep_blue, linestyle=None, marker=None):
   counties_of_interest = list(set(county_feats.keys() ) & set(counties_of_interest))
   df = county_list_to_df(counties_of_interest)
+
+  if date_range:
+    start, end = date_range
+    df = df.loc[start:end]
 
   x = df.index.tolist()
-  label = 'Average Depression ' + counties_name
+  label = 'Avg Depression ' + counties_name
   print("Plotting",label)
-  ax.plot(x, df['avg_dep'],  label=label)
+  ax.plot(x, df['avg_dep'],  label=label, color=color, linestyle=linestyle, marker=marker)
   if stderr:
-    ax.fill_between(x, df['ci_dep_down'].tolist(), df['ci_dep_up'].tolist(), alpha=0.3) # error area
+    ax.fill_between(x, df['ci_dep_down'].tolist(), df['ci_dep_up'].tolist(), color=color, alpha=0.3) # error area
 
-def plot_anxiety(counties_of_interest, counties_name, stderr=True):
+  # Label line with text
+  ax.annotate(label, xy=(x[0], df['avg_dep'].to_list()[0]), xycoords='data', color=color)
+
+def plot_anxiety(counties_of_interest, counties_name, stderr=True, date_range=None, color=anx_orange, linestyle=None, marker=None):
   counties_of_interest = list(set(county_feats.keys() ) & set(counties_of_interest))
   df = county_list_to_df(counties_of_interest)
+
+  if date_range:
+    start, end = date_range
+    df = df.loc[start:end]
 
   x = df.index.tolist()
   label = 'Average Anxiety ' + counties_name
   print("Plotting",label)
-  ax.plot(x, df['avg_anx'],  label=label)
+  ax.plot(x, df['avg_anx'],  label=label, color=color, linestyle=linestyle, marker=marker)
   if stderr:
-    ax.fill_between(x, df['ci_anx_down'].tolist(), df['ci_anx_up'].tolist(), alpha=0.3) # error area
+    ax.fill_between(x, df['ci_anx_down'].tolist(), df['ci_anx_up'].tolist(), color=color, alpha=0.3) # error area
+
+  # Label line with text
+  ax.annotate(label, xy=(x[0], df['avg_anx'].to_list()[0]), xycoords='data', color=color)
 
 def plot_events(text=True):
   events_dict = {}
-  events_dict["Christmas 2019"] = [dt.datetime(2019, 12, 25), dt.datetime(2019, 12, 29)]
-  events_dict["First US Case COVID"] = [dt.datetime(2020, 1, 21), dt.datetime(2020, 1, 28)]
-  events_dict["First US COVID Lockdowns"] = [dt.datetime(2020, 3, 11), dt.datetime(2020, 3, 19)]
+  events_dict["Christmas 2019"] = [dt.datetime(2019, 12, 25), dt.datetime(2019, 12, 30)]
+  events_dict["First US Case COVID"] = [dt.datetime(2020, 1, 21), dt.datetime(2020, 1, 26)]
+  events_dict["First US COVID Lockdowns"] = [dt.datetime(2020, 3, 11), dt.datetime(2020, 3, 16)]
   events_dict["Murder of George Floyd"] = [dt.datetime(2020, 5, 25), dt.datetime(2020, 5, 30)]
-  events_dict["Presidential Election Results"] = [dt.datetime(2020, 11, 7), dt.datetime(2020, 11, 14)]
+  events_dict["Presidential Election Results"] = [dt.datetime(2020, 11, 7), dt.datetime(2020, 11, 12)]
   #events_dict["Texas Shootings"] = [dt.datetime(2019, 8, 3), dt.datetime(2019, 8, 31)]
   bottom, top = ax.get_ylim()
   for event_name, dates in events_dict.items():
@@ -267,10 +296,10 @@ with connection:
     x = df.index.tolist()
 
     # Plot Depression and Anxiety
-    anx_line = plt.plot(x, df['avg_anx'], 'b-', label='Average Anxiety')
-    dep_line = plt.plot(x, df['avg_dep'], 'r-', label='Average Depression')
-    anx_area = plt.fill_between(x, df['ci_anx_down'].tolist(), df['ci_anx_up'].tolist(), color='c', alpha=0.4) # error area
-    dep_area = plt.fill_between(x, df['ci_dep_down'].tolist(), df['ci_dep_up'].tolist(), color='pink', alpha=0.4) # error area
+    dep_line = plt.plot(x, df['avg_dep'], color=dep_blue, label='Average Depression')
+    anx_line = plt.plot(x, df['avg_anx'], color=anx_orange, label='Average Anxiety')
+    dep_area = plt.fill_between(x, df['ci_dep_down'].tolist(), df['ci_dep_up'].tolist(), color=dep_blue, alpha=0.3) # error area
+    anx_area = plt.fill_between(x, df['ci_anx_down'].tolist(), df['ci_anx_up'].tolist(), color=anx_orange, alpha=0.3) # error area
     # Events
     plot_events()
     # Make plot pretty
@@ -281,7 +310,7 @@ with connection:
     ax.spines['right'].set_visible(False)
     ax.spines['top'].set_visible(False)
     plt.gcf().autofmt_xdate()
-    plt.legend()
+    #plt.legend()
     dates= list(pd.date_range('2019-01-01','2021-01-01' , freq='1M')-pd.offsets.MonthBegin(1))
     plt.xticks(dates)
     # Plot everything
@@ -292,12 +321,11 @@ with connection:
     fig, ax = plt.subplots(1)
     fig.set_size_inches(18, 8)
     #plot_depression(ny_counties, "in New York")
-    #for region,region_name in zip(regions,region_names): plot_depression(region, region_name, stderr=False)
+    #for i, (region,region_name) in enumerate(zip(regions,region_names)): plot_depression(region, region_name, color=simple_blue[i], linestyle=linestyles[i], stderr=False)
     #plot_depression(d1_counties, "in New England")
     #plot_depression(ca_counties, "in California")
     plot_depression(all_counties, "Nationally")
     plot_events()
-    ax.set_prop_cycle(cycler('color', ['c', 'm', 'y', 'k']) + cycler('lw', [1, 2, 3, 4]))
     # Make plot pretty
     plt.title("Depression Over Time")
     plt.xlabel("Time")
@@ -317,9 +345,9 @@ with connection:
     fig, ax = plt.subplots(1)
     fig.set_size_inches(18, 8)
     #plot_anxiety(ny_counties, "in New York")
-    for region,region_name in zip(regions,region_names): plot_anxiety(region, region_name, stderr=False)
+    #for i, (region,region_name) in enumerate(zip(regions,region_names)): plot_anxiety(region, region_name, color=simple_orange[i], linestyle=linestyles[i], stderr=False)
     #plot_anxiety(d1_counties, "in New England")
-    #plot_anxiety(all_counties, "Nationally")
+    plot_anxiety(all_counties, "Nationally")
     plot_events()
     # Make plot pretty
     plt.title("Anxiety Over Time")
@@ -414,22 +442,23 @@ with connection:
     #ax2 = plt
     sql = "select fips as cnty, yearweek, WEB_worryF, WEC_sadF, neg_affect_lowArousal, neg_affect_highArousal, neg_affect, pos_affect, affect_balance from gallup_covid_panel_micro_poll.old_hasSadBefAug17_recodedEmoRaceGenPartyAge_v3_02_15;"
     gallup_full = pd.read_sql(sql, connection)
-    #gallup = gallup[gallup['cnty'].isin(all_counties)] # filter to only counties in all_counties
+    gallup_full = gallup_full[gallup_full['cnty'].isin(all_counties)] # filter to only counties in all_counties
     gallup_full['yearweek'] = gallup_full['yearweek'].astype(str)
     gallup_full['yearweek'] = gallup_full['yearweek'].str[:4] + "_" + gallup_full['yearweek'].str[4:]
+    gallup_full = gallup_full.groupby(by=["yearweek","cnty"]).mean().reset_index() # aggregate to yearweek_cnty so we share group_id with LBA
     gallup_full['yearweek_cnty'] = gallup_full['yearweek'] + ":" + gallup_full['cnty']
     gallup_full = pd.merge(gallup_full,county_info[['cnty','state_name']],on='cnty')
     gallup_full['yearweek_state'] = gallup_full['yearweek'] + ":" + gallup_full['state_name']
     print("\nGallup COVID Panel (Full)\n",gallup_full.head(10))
-    gallup_stderr = gallup_full.groupby(by=["yearweek"]).sem().reset_index()
+    gallup_stderr = gallup_full.groupby(by=["yearweek"]).sem().reset_index() # TODO stderr is using ALL entries and not county aggregates
     gallup = gallup_full.groupby(by=["yearweek"]).mean().reset_index() # Used for plotting by yearweek
     gallup['date'] = gallup['yearweek'].apply(lambda yw: yearweek_to_dates(yw)[1])
 
     x = gallup['date'].tolist()
-    #sad_line = ax2.plot(x, gallup['WEC_sadF'], label='Sadness', c="orange")
-    #sad_err = ax2.errorbar(x, gallup['WEC_sadF'], gallup_stderr['WEC_sadF'], c="red", linestyle='None', label='_nolegend_')
-    worry_line = ax2.plot(x, gallup['WEB_worryF'], label='Worry', alpha=1.0)
-    worry_err = ax2.errorbar(x, gallup['WEB_worryF'], gallup_stderr['WEB_worryF'], linestyle='None', label='_nolegend_')
+    sad_line = ax2.plot(x, gallup['WEC_sadF'], color="blue", label='Sadness')
+    sad_err = ax2.errorbar(x, gallup['WEC_sadF'], gallup_stderr['WEC_sadF'], color="blue", alpha=0.3, linestyle='None', label='_nolegend_')
+    #worry_line = ax2.plot(x, gallup['WEB_worryF'], color='red', label='Worry', alpha=1.0)
+    #worry_err = ax2.errorbar(x, gallup['WEB_worryF'], gallup_stderr['WEB_worryF'], color='red', alpha=0.3, linestyle='None', label='_nolegend_')
 
     #pos_line = ax2.plot(x, gallup['pos_affect'], label='Pos Affect')
     #neg_line = ax2.plot(x, gallup['neg_affect'], label='Neg Affect')
@@ -437,15 +466,15 @@ with connection:
     #high_neg_line = ax2.plot(x, gallup['neg_affect_highArousal'], label='High Arousal Neg Affect') # Anxiety
     #affect_bal_line = ax2.plot(x, gallup['affect_balance'], label='Affect Balance')
     #plot_events(text=True)
-    #plot_depression(all_counties, "Nationally")
-    plot_anxiety(all_counties, "Nationally")
+    plot_depression(all_counties, "Nationally", date_range=(dt.datetime(2020,2,1),dt.datetime(2020,10,1)))
+    #plot_anxiety(all_counties, "Nationally", date_range=(dt.datetime(2020,2,1),dt.datetime(2020,10,1)))
     plt.title("Gallup COVID Panel and LBA Over Time")
     plt.xlabel("Time")
     plt.ylabel("Feature Score")
     #ax.axes.yaxis.set_ticks([]) # Clean up axes
     plt.gcf().autofmt_xdate()
     plt.legend()
-    dates= list(pd.date_range('2019-01-01','2021-01-01' , freq='1M')-pd.offsets.MonthBegin(1))
+    dates= list(pd.date_range('2020-02-01','2020-10-01' , freq='1M')-pd.offsets.MonthBegin(1))
     #dates= list(pd.date_range('2020-03-01','2020-09-01' , freq='1M')-pd.offsets.MonthBegin(1))
     plt.xticks(dates)
     plt.savefig("over_time_gallup_covid.png", bbox_inches='tight')
