@@ -101,44 +101,42 @@ with connection:
     print("LBA (full)\n",lba_full.head(10),'\nrow count:',len(lba_full));
 
     # Process Gallup COVID Panel
+    gallup_gft = 1
     sql = "select fips as cnty, yearweek, WEB_worryF, WEC_sadF, neg_affect_lowArousal, neg_affect_highArousal, neg_affect, pos_affect, affect_balance from gallup_covid_panel_micro_poll.old_hasSadBefAug17_recodedEmoRaceGenPartyAge_v3_02_15;"
     gallup = pd.read_sql(sql, connection)
-    gallup = gallup[gallup['cnty'].isin(all_counties)] # filter to only counties in all_counties
+    print("Gallup Original Length:",len(gallup))
+    gallup_county_counts = gallup['cnty'].value_counts()
+    gallup_passing_counties = list(gallup_county_counts[gallup_county_counts >= gallup_gft].index)
+    gallup = gallup[gallup['cnty'].isin(gallup_passing_counties)]
+    print("Gallup w/ {}GFT Length:".format(gallup_gft),len(gallup))
+    gallup = gallup.groupby(by=["yearweek","cnty"]).mean().reset_index() # aggregate to yearweek_cnty so we share group_id with LBA
     gallup['yearweek'] = gallup['yearweek'].astype(str)
     gallup['yearweek'] = gallup['yearweek'].str[:4] + "_" + gallup['yearweek'].str[4:]
     gallup['yearweek_cnty'] = gallup['yearweek'] + ":" + gallup['cnty']
-    gallup = gallup.groupby("yearweek_cnty").mean().reset_index() # mean aggregate through yearweek_county
-    gallup[['yearweek','cnty']] = gallup['yearweek_cnty'].str.split(":",expand=True)
     gallup = pd.merge(gallup,county_info[['cnty','state_name','region_name']],on='cnty')
     gallup['yearweek_state'] = gallup['yearweek'] + ":" + gallup['state_name']
-    print("\nGallup COVID Panel (AVG on yearweek_cnty)\n",gallup.head(10),'\nrow count:',len(gallup));
+    print("\nGallup COVID Panel (AVG by yearweek_cnty)\n",gallup.head(10),'\nrow count:',len(gallup));
 
     # Prepare Fixed Effects Data
     gallup_cols = ['WEC_sadF', 'WEB_worryF'] + ['yearweek_cnty']
     data = gallup[gallup_cols].merge(lba_full, on='yearweek_cnty')
-
-    # filter data to need at least min_entity_count entries per entity
-    entity = "cnty"
-    entity_value_counts = data[entity].value_counts()
-    min_entity_count = 5
-    valid_entities = list(entity_value_counts[entity_value_counts > min_entity_count].index)
-    #print("Value Counts:\n",entity_value_counts)
-    #print("Valid Entities\n",valid_entities)
-    data = data[data[entity].isin(valid_entities)]
+    
     print("\nMerged LBA and Gallup\n",data.head(10),'\nrow count:',len(data));
 
-    # De-Mean Data
-    Y = "WEC_sadF" # WEB_worryF
-    T = "avg_dep" # avg_anx
-    X = [T,"region_name"] # state_name, region_name, year, yearweek, month, use C(dummy_var) to create dummy vars
-    entity = "cnty"
+    print("\nData Stats")
+    print("data['WEB_worryF'].std() =",data['WEB_worryF'].std())
+    print("data['WEC_sadF'].std()   =",data['WEC_sadF'].std())
+    print("data['avg_anx'].std()    =",data['avg_anx'].std())
+    print("data['avg_dep'].std()    =",data['avg_dep'].std())
+    print()
 
     # De-Mean All The Outcomes
+    entity = "cnty"
     outcomes = ['avg_dep','avg_anx','WEC_sadF','WEB_worryF']
     avg_outcomes = ["avg({})".format(x) for x in outcomes]
     mean_data = data.groupby(entity)[outcomes].mean().reset_index() # find average within each entity
-    mean_data.columns = ["cnty"]+avg_outcomes
-    demeaned_data = data.merge(mean_data, on='cnty') # merge on the average values
+    mean_data.columns = [entity]+avg_outcomes
+    demeaned_data = data.merge(mean_data, on=entity) # merge on the average values
     demeaned_data[outcomes] = demeaned_data[outcomes] - demeaned_data[avg_outcomes].values # subtract off the average values
     demeaned_data = demeaned_data.drop(columns=avg_outcomes)
 
@@ -151,20 +149,32 @@ with connection:
     print("\nDemeaned Data\n",demeaned_data.head(10),'\nrow count:',len(demeaned_data));
 
     print("\nDemeaned Data Stats")
-    print("demeaned_data['WEB_worryF'].std()",demeaned_data['WEB_worryF'].std())
-    print("demeaned_data['WEC_sadF'].std()",demeaned_data['WEC_sadF'].std())
-    print("demeaned_data['avg_anx'].std()",demeaned_data['avg_anx'].std())
-    print("demeaned_data['avg_dep'].std()",demeaned_data['avg_dep'].std())
+    print("demeaned_data['WEB_worryF'].std() =",demeaned_data['WEB_worryF'].std())
+    print("demeaned_data['WEC_sadF'].std()   =",demeaned_data['WEC_sadF'].std())
+    print("demeaned_data['avg_anx'].std()    =",demeaned_data['avg_anx'].std())
+    print("demeaned_data['avg_dep'].std()    =",demeaned_data['avg_dep'].std())
     print()
 
     # Run OLS Model
-    formula = "WEC_sadF ~ avg_dep + region_name" # change this to alter fixed effects equation
-    #formula = "WEB_worryF ~ avg_anx + region_name" # change this to alter fixed effects equation
-    #formula = "WEC_sadF ~ avg_anx + region_name" # change this to alter fixed effects equation
-    #formula = "WEB_worryF ~ avg_dep + region_name" # change this to alter fixed effects equation
-    print('\t\t\tDe-Meaned OLS on',formula)
-    mod = smf.ols(formula, data=demeaned_data).fit()
-    print(mod.summary().tables[1])
+    formulas = []
+    formulas.append("WEC_sadF ~ avg_dep + region_name -1") 
+    formulas.append("WEB_worryF ~ avg_anx + region_name -1") 
+    formulas.append("WEC_sadF ~ avg_anx + region_name -1" )
+    formulas.append("WEB_worryF ~ avg_dep + region_name -1") 
+    
+    for formula in formulas:
+      print('\t\tDe-Meaned OLS on',formula)
+      mod = smf.ols(formula, data=demeaned_data).fit()
+      #print(mod.summary().tables[0])
+      print(mod.summary().tables[1])
+
+
+    # Run Mixed Linear Model
+    formula = formulas[0]
+    md = smf.mixedlm(formula=formula, data=data, groups=data["region_name"])
+    mdf = md.fit()
+    print('\n',mdf.summary())
+
 
     # Run correlations (can be done on any level)
     group_on = 'yearweek_cnty' # yearweek = week x national, yearweek_cnty = week x county, yearweek_state = week x state, cnty = year x county
@@ -176,10 +186,6 @@ with connection:
     corr_plot = sns.heatmap(corr.head(2), center=0, square=True, linewidths=.5, annot=True)
     corr_plot.figure.savefig("LBA vs Gallup Demeaned.png", bbox_inches='tight')
 
-    # Run Mixed Linear Model
-    # md = smf.mixedlm(formula="WEC_sadF ~ avg_dep + region_name", data=data, groups=data["cnty"])
-    # mdf = md.fit()
-    # print('\n',mdf.summary())
 
     # Make Gallup into feat table: ['group_id', 'feat', 'value', 'group_norm']
     # gallup_worry = gallup.copy(deep=True)

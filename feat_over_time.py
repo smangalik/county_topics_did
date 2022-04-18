@@ -8,6 +8,7 @@ from cycler import cycler
 
 from pymysql import cursors, connect
 from tqdm import tqdm
+from datetime import timedelta
 
 import datetime as dt
 import numpy as np
@@ -193,7 +194,7 @@ def plot_depression(counties_of_interest, counties_name, stderr=True, date_range
     ax.fill_between(x, df['ci_dep_down'].tolist(), df['ci_dep_up'].tolist(), color=color, alpha=0.3) # error area
 
   # Label line with text
-  ax.annotate(label, xy=(x[0], df['avg_dep'].to_list()[0]), xycoords='data', color=color)
+  #ax.annotate("\n".join(label.split()), xy=(x[0] - timedelta(days=7), df['avg_dep'].to_list()[0]), color=color)
 
 def plot_anxiety(counties_of_interest, counties_name, stderr=True, date_range=None, color=anx_orange, linestyle=None, marker=None):
   counties_of_interest = list(set(county_feats.keys() ) & set(counties_of_interest))
@@ -204,14 +205,14 @@ def plot_anxiety(counties_of_interest, counties_name, stderr=True, date_range=No
     df = df.loc[start:end]
 
   x = df.index.tolist()
-  label = 'Average Anxiety ' + counties_name
+  label = 'Avg Anxiety ' + counties_name
   print("Plotting",label)
   ax.plot(x, df['avg_anx'],  label=label, color=color, linestyle=linestyle, marker=marker)
   if stderr:
     ax.fill_between(x, df['ci_anx_down'].tolist(), df['ci_anx_up'].tolist(), color=color, alpha=0.3) # error area
 
   # Label line with text
-  ax.annotate(label, xy=(x[0], df['avg_anx'].to_list()[0]), xycoords='data', color=color)
+  #ax.annotate("\n".join(label.split()), xy=(x[0] - timedelta(days=7), df['avg_anx'].to_list()[0]), color=color)
 
 def plot_events(text=True):
   events_dict = {}
