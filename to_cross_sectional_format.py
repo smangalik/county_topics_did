@@ -8,8 +8,11 @@ def main():
     connection  = connect(read_default_file="~/.my.cnf")
 
     # With the 1upt version of the data
-    tables = ["ctlb2.feat$dd_depAnxAng_rw$timelines2019$1upt100user$year_cnty",
-              "ctlb2.feat$dd_depAnxAng_rw$timelines2020$1upt100user$year_cnty"]
+    # tables = ["ctlb2.feat$dd_depAnxAng_rw$timelines2019$1upt100user$year_cnty",
+    #           "ctlb2.feat$dd_depAnxAng_rw$timelines2020$1upt100user$year_cnty"]
+
+    #tables = ["ctlb2.feat$dd_depAnxLex_ctlb2$timelines19to20$3upt50user$yw_cnty"] # 50 GFT
+    tables = ["ctlb2.feat$dd_depAnxLex_ctlb2$timelines19to20$05sc200user$yw_cnty"] # 200 GFT, fixed scaling
 
     sql = "SELECT * FROM {} ".format( tables[0] )
     df = pd.read_sql(sql, connection)
@@ -43,7 +46,7 @@ def main():
     print(final)
 
     # Output CSV
-    final.to_csv("./data/feat.dd_depAnxAng_rw$timelines$1upt100user$year_cnty.csv", index=False)
+    final.to_csv("./data/feat.dd_depAnxAng_ctlb2$3upt50user$year_cnty.csv", index=False)
 
 if __name__ == "__main__":
     main()

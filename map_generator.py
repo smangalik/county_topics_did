@@ -1,8 +1,12 @@
+# Make sure to `conda activate`
+
 from urllib.request import urlopen
 import json
 import plotly.express as px
 from pymysql import connect
 import datetime
+
+gft=50
 
 def yearweek_to_dates(yw):
   year, week = yw.split("_")
@@ -19,9 +23,9 @@ def main():
 
     import pandas as pd
 
-    tables = ["ctlb2.feat$dd_depAnxAng$timelines2019$yw_cnty$1gra",
-            "ctlb2.feat$dd_depAnxAng$timelines2020$yw_cnty$1gra"]
-    feat_value = "DEP_SCORE" # ANX_SCORE, DEP_SCORE, ANG_SCORE
+    # tables = ["ctlb2.feat$dd_depAnxAng$timelines2019$yw_cnty$1gra", "ctlb2.feat$dd_depAnxAng$timelines2020$yw_cnty$1gra"]
+    tables = ["ctlb2.feat$dd_depAnxLex_ctlb2$timelines19to20$05sc{}user$yw_cnty".format(gft)] 
+    feat_value = "DEP_SCORE" # ANX_SCORE, DEP_SCORE
     filter = "WHERE feat = '{}'".format(feat_value)
     relevant_columns = "*"
     database = 'ctlb2'
@@ -54,19 +58,21 @@ def main():
     grouped = df.groupby("cnty").mean().reset_index()
     print(grouped)
 
+    # print("Collecting Super County Mapping")
+    # super_cnty_mapping = pd.read_csv("~/super_counties/cnty_supes_mapping_{}.csv".format(gft),\
+    #     dtype={'cnty':str, 'cnty_w_sups{}'.format(gft):str})
+    # super_cnty_mapping['is_super'] = 0
+    # super_cnty_mapping.loc[super_cnty_mapping['weight']<1,'is_super'] = 1
+    # print(super_cnty_mapping.head())
+
     print("Loading GeoJSON")
     with urlopen('https://raw.githubusercontent.com/plotly/datasets/master/geojson-counties-fips.json') as response:
         string = response.read().decode('utf-8')
         counties = json.loads(string)
 
-    # print("Loading Data")
-    # import pandas as pd
-    # df = pd.read_csv("https://raw.githubusercontent.com/plotly/datasets/master/fips-unemp-16.csv",
-    #                 dtype={"fips": str})
-
-    print("Plotting")
+    print("Plotting",feat_value)
     fig = px.choropleth(df, geojson=counties, locations='cnty', color='group_norm',
-                            color_continuous_scale="Viridis",
+                            color_continuous_scale="Blues", # Blues / Oranges
                             range_color=(min(grouped['group_norm']), max(grouped['group_norm'])),
                             scope="usa", # What region is plotted
                             labels={'group_norm':feat_value}
@@ -74,12 +80,22 @@ def main():
     fig.update_layout(margin={"r":0,"t":0,"l":0,"b":0})
 
     # Remove the legend
-    # fig.update_layout(coloraxis_showscale=False)
+    fig.update_layout(coloraxis_showscale=False)
 
     print("Serving Choropleth")
     #fig.show()
     filename = "choropleth_" + feat_value + ".png"
     fig.write_image(filename)
+
+    # print("Plotting Super Counties")
+    # fig = px.choropleth(super_cnty_mapping, geojson=counties, locations='cnty', color='is_super',
+    #                         color_continuous_scale="Bluered", # Blues / Oranges
+    #                         range_color=(0, 1),
+    #                         scope="usa", # What region is plotted
+    #                         labels={'is_super':"Is in a super county?"}
+    #                         )
+    # fig.update_layout(margin={"r":0,"t":0,"l":0,"b":0})
+    # fig.show()
 
 if __name__ == "__main__":
     main()
